@@ -11,6 +11,19 @@ A command-line interface for Jira with interactive menus, secure credential stor
 
 ## Installation
 
+### Quick Install (macOS/Linux)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/e/jiractl/main/install.sh | bash
+```
+
+### Homebrew (macOS/Linux)
+
+```bash
+brew tap e/tap
+brew install jiractl
+```
+
 ### From Source
 
 ```bash
@@ -18,6 +31,12 @@ git clone https://github.com/e/jiractl.git
 cd jiractl
 make build
 make install  # copies to /usr/local/bin
+```
+
+### Go Install
+
+```bash
+go install github.com/e/jiractl/cmd/jiractl@latest
 ```
 
 ### Pre-built Binaries

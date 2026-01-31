@@ -90,5 +90,20 @@ release:
     go install github.com/e/jiractl/cmd/jiractl@{{ .Tag }}
     ```
 
+brews:
+  - name: jiractl
+    repository:
+      owner: e
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/e/jiractl"
+    description: "CLI tool for interacting with Jira"
+    license: "MIT"
+    install: |
+      bin.install "jiractl"
+    test: |
+      system "#{bin}/jiractl", "--version"
+
 announce:
   skip: true
