@@ -1,0 +1,94 @@
+# GoReleaser configuration for jiractl
+# Documentation: https://goreleaser.com
+
+version: 2
+
+project_name: jiractl
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: jiractl
+    binary: jiractl
+    main: ./cmd/jiractl
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    files:
+      - README.md
+      - LICENSE*
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - '^chore:'
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Other
+      order: 999
+
+release:
+  github:
+    owner: e
+    name: jiractl
+  draft: false
+  prerelease: auto
+  mode: replace
+  header: |
+    ## jiractl {{ .Version }}
+
+    CLI tool for interacting with Jira.
+  footer: |
+    ## Installation
+
+    ### Direct Download
+    Download the appropriate binary for your platform from the assets below.
+
+    ### Build from Source
+    ```bash
+    go install github.com/e/jiractl/cmd/jiractl@{{ .Tag }}
+    ```
+
+announce:
+  skip: true
