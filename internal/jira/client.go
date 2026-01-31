@@ -1,7 +1,9 @@
 package jira
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 
 	jira "github.com/andygrunwald/go-jira"
@@ -12,6 +14,12 @@ import (
 type Client struct {
 	*jira.Client
 	config *config.Config
+}
+
+// SearchResult represents the response from the v3 search API
+type SearchResult struct {
+	Issues []jira.Issue `json:"issues"`
+	Total  int          `json:"total"`
 }
 
 // NewClient creates a new Jira client using credentials from keyring and config
@@ -79,26 +87,39 @@ func (c *Client) CreateIssue(project, issueType, summary, description string) (*
 	return created, nil
 }
 
-// SearchIssues searches for issues using JQL
+// SearchIssues searches for issues using JQL via the v3 API
 func (c *Client) SearchIssues(jql string, maxResults int) ([]jira.Issue, error) {
 	if maxResults <= 0 {
 		maxResults = 50
 	}
 
-	opts := &jira.SearchOptions{
-		MaxResults: maxResults,
-		Fields:     []string{"key", "summary", "status", "assignee", "priority", "created", "updated"},
+	// Use the v3 search/jql endpoint
+	apiEndpoint := fmt.Sprintf(
+		"rest/api/3/search/jql?jql=%s&maxResults=%d&fields=key,summary,status,assignee,priority,created,updated",
+		url.QueryEscape(jql),
+		maxResults,
+	)
+
+	req, err := c.NewRequest("GET", apiEndpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	issues, resp, err := c.Issue.Search(jql, opts)
+	resp, err := c.Do(req, nil)
 	if err != nil {
 		if resp != nil {
 			return nil, fmt.Errorf("search failed (status %d): %w", resp.StatusCode, err)
 		}
 		return nil, fmt.Errorf("search failed: %w", err)
 	}
+	defer resp.Body.Close()
 
-	return issues, nil
+	var result SearchResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return result.Issues, nil
 }
 
 // GetIssue retrieves a single issue by key
