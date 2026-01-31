@@ -5,9 +5,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/e/jiractl/internal/config"
-	"github.com/e/jiractl/internal/jira"
-	"github.com/e/jiractl/internal/keyring"
+	"github.com/eugenetaranov/jiractl/internal/config"
+	"github.com/eugenetaranov/jiractl/internal/jira"
+	"github.com/eugenetaranov/jiractl/internal/keyring"
 	"github.com/manifoldco/promptui"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"

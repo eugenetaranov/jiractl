@@ -70,7 +70,7 @@ changelog:
 
 release:
   github:
-    owner: e
+    owner: eugenetaranov
     name: jiractl
   draft: false
   prerelease: auto
@@ -87,17 +87,17 @@ release:
 
     ### Build from Source
     ```bash
-    go install github.com/e/jiractl/cmd/jiractl@{{ .Tag }}
+    go install github.com/eugenetaranov/jiractl/cmd/jiractl@{{ .Tag }}
     ```
 
 brews:
   - name: jiractl
     repository:
-      owner: e
+      owner: eugenetaranov
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     directory: Formula
-    homepage: "https://github.com/e/jiractl"
+    homepage: "https://github.com/eugenetaranov/jiractl"
     description: "CLI tool for interacting with Jira"
     license: "MIT"
     install: |

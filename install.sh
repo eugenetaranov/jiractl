@@ -2,9 +2,9 @@
 set -e
 
 # jiractl installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/e/jiractl/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/eugenetaranov/jiractl/main/install.sh | bash
 
-REPO="e/jiractl"
+REPO="eugenetaranov/jiractl"
 BINARY="jiractl"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 

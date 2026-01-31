@@ -1,4 +1,4 @@
-module github.com/e/jiractl
+module github.com/eugenetaranov/jiractl
 
 go 1.24.0
 

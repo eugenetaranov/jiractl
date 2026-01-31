@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/e/jiractl/internal/jira"
+	"github.com/eugenetaranov/jiractl/internal/jira"
 	"github.com/manifoldco/promptui"
 	"github.com/spf13/cobra"
 )

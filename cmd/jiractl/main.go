@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/e/jiractl/internal/cmd"
+	"github.com/eugenetaranov/jiractl/internal/cmd"
 )
 
 var (

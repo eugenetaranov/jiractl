@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	jira "github.com/andygrunwald/go-jira"
-	"github.com/e/jiractl/internal/config"
-	"github.com/e/jiractl/internal/keyring"
+	"github.com/eugenetaranov/jiractl/internal/config"
+	"github.com/eugenetaranov/jiractl/internal/keyring"
 )
 
 type Client struct {
