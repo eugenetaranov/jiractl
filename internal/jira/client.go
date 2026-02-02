@@ -3,6 +3,7 @@ package jira
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"strings"
 
@@ -53,8 +54,13 @@ func NewClient(cfg *config.Config) (*Client, error) {
 	}, nil
 }
 
+// CreateIssueOptions contains optional fields for issue creation
+type CreateIssueOptions struct {
+	EpicLink string
+}
+
 // CreateIssue creates a new issue in Jira
-func (c *Client) CreateIssue(project, issueType, summary, description string) (*jira.Issue, error) {
+func (c *Client) CreateIssue(project, issueType, summary, description string, opts *CreateIssueOptions) (*jira.Issue, error) {
 	issue := &jira.Issue{
 		Fields: &jira.IssueFields{
 			Project: jira.Project{
@@ -76,9 +82,28 @@ func (c *Client) CreateIssue(project, issueType, summary, description string) (*
 		issue.Fields.Labels = c.config.IssueDefaults.Labels
 	}
 
+	// Apply epic link if provided
+	epicLink := ""
+	if opts != nil && opts.EpicLink != "" {
+		epicLink = opts.EpicLink
+	} else if c.config.IssueDefaults.EpicLink != "" {
+		epicLink = c.config.IssueDefaults.EpicLink
+	}
+
+	if epicLink != "" {
+		// Epic Link is typically a custom field. In Jira Cloud, it's often "parent" for next-gen projects
+		// or a custom field like "customfield_10014" for classic projects.
+		// We'll use the parent field which works for next-gen/team-managed projects.
+		issue.Fields.Parent = &jira.Parent{Key: epicLink}
+	}
+
 	created, resp, err := c.Issue.Create(issue)
 	if err != nil {
-		if resp != nil {
+		if resp != nil && resp.Body != nil {
+			body, _ := io.ReadAll(resp.Body)
+			if len(body) > 0 {
+				return nil, fmt.Errorf("failed to create issue: %s", string(body))
+			}
 			return nil, fmt.Errorf("failed to create issue (status %d): %w", resp.StatusCode, err)
 		}
 		return nil, fmt.Errorf("failed to create issue: %w", err)
@@ -156,4 +181,10 @@ func (c *Client) TestConnection() error {
 		return fmt.Errorf("connection test failed: %w", err)
 	}
 	return nil
+}
+
+// GetEpics returns open epics in the given project
+func (c *Client) GetEpics(projectKey string) ([]jira.Issue, error) {
+	jql := fmt.Sprintf("project = %s AND issuetype = Epic AND resolution = Unresolved ORDER BY created DESC", projectKey)
+	return c.SearchIssues(jql, 100)
 }

@@ -8,7 +8,6 @@ import (
 	"github.com/eugenetaranov/jiractl/internal/config"
 	"github.com/eugenetaranov/jiractl/internal/jira"
 	"github.com/eugenetaranov/jiractl/internal/keyring"
-	"github.com/manifoldco/promptui"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -52,6 +51,8 @@ func init() {
 }
 
 func runAuthList(cmd *cobra.Command, args []string) error {
+	cmd.SilenceUsage = true
+
 	username, err := keyring.GetUsername()
 	if err != nil {
 		return fmt.Errorf("failed to get username: %w", err)
@@ -89,18 +90,18 @@ func runAuthList(cmd *cobra.Command, args []string) error {
 }
 
 func runAuthDelete(cmd *cobra.Command, args []string) error {
+	cmd.SilenceUsage = true
+
 	if !keyring.HasCredentials() {
 		fmt.Println("No credentials stored.")
 		return nil
 	}
 
-	prompt := promptui.Prompt{
-		Label:     "Delete stored credentials",
-		IsConfirm: true,
-	}
-
-	_, err := prompt.Run()
+	confirmed, err := promptConfirm("Delete stored credentials?")
 	if err != nil {
+		return err
+	}
+	if !confirmed {
 		fmt.Println("Cancelled.")
 		return nil
 	}
@@ -114,22 +115,18 @@ func runAuthDelete(cmd *cobra.Command, args []string) error {
 }
 
 func runAuthCreate(cmd *cobra.Command, args []string) error {
+	cmd.SilenceUsage = true
+
 	currentUsername, _ := keyring.GetUsername()
 
 	// Prompt for username
-	usernamePrompt := promptui.Prompt{
-		Label:   "Username (email)",
-		Default: currentUsername,
-		Validate: func(input string) error {
-			if input == "" {
-				return fmt.Errorf("username is required")
-			}
-			return nil
-		},
-	}
-	username, err := usernamePrompt.Run()
+	username, err := promptTextWithDefault("Username (email)", currentUsername, true)
 	if err != nil {
-		return handlePromptError(err)
+		if err == ErrPromptCancelled {
+			fmt.Println("\nCancelled.")
+			return nil
+		}
+		return err
 	}
 
 	// Prompt for API token using term.ReadPassword (handles paste correctly)
@@ -157,6 +154,8 @@ func runAuthCreate(cmd *cobra.Command, args []string) error {
 }
 
 func runAuthTest(cmd *cobra.Command, args []string) error {
+	cmd.SilenceUsage = true
+
 	if !keyring.HasCredentials() {
 		return fmt.Errorf("no credentials stored, run 'jiractl auth create' first")
 	}

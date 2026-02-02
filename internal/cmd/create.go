@@ -2,11 +2,10 @@ package cmd
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/eugenetaranov/jiractl/internal/config"
 	"github.com/eugenetaranov/jiractl/internal/jira"
-	"github.com/manifoldco/promptui"
+	fuzzyfinder "github.com/ktr0731/go-fuzzyfinder"
 	"github.com/spf13/cobra"
 )
 
@@ -33,6 +32,8 @@ func loadConfig() (*config.Config, error) {
 }
 
 func runCreate(cmd *cobra.Command, args []string) error {
+	cmd.SilenceUsage = true
+
 	cfg, err := loadConfig()
 	if err != nil {
 		return err
@@ -43,62 +44,91 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Get available issue types
-	issueTypes, err := client.GetIssueTypes(cfg.Project)
-	if err != nil {
-		return fmt.Errorf("failed to get issue types: %w", err)
-	}
-
-	// Build issue type list
-	typeNames := make([]string, len(issueTypes))
-	for i, it := range issueTypes {
-		typeNames[i] = it.Name
-	}
-
-	// Find default issue type index
-	defaultIdx := 0
+	// Determine issue type
+	var issueType string
 	if cfg.IssueDefaults.IssueType != "" {
-		for i, name := range typeNames {
-			if name == cfg.IssueDefaults.IssueType {
-				defaultIdx = i
-				break
-			}
+		issueType = cfg.IssueDefaults.IssueType
+	} else {
+		// Get available issue types
+		issueTypes, err := client.GetIssueTypes(cfg.Project)
+		if err != nil {
+			return fmt.Errorf("failed to get issue types: %w", err)
 		}
-	}
 
-	// Prompt for issue type
-	typePrompt := promptui.Select{
-		Label:     "Issue Type",
-		Items:     typeNames,
-		CursorPos: defaultIdx,
-	}
-	_, issueType, err := typePrompt.Run()
-	if err != nil {
-		return handlePromptError(err)
+		// Build issue type list
+		typeNames := make([]string, len(issueTypes))
+		for i, it := range issueTypes {
+			typeNames[i] = it.Name
+		}
+
+		// Prompt for issue type
+		idx, err := fzfSelect(typeNames, "Select issue type")
+		if err != nil {
+			if err == fuzzyfinder.ErrAbort {
+				fmt.Println("\nCancelled.")
+				return nil
+			}
+			return err
+		}
+		issueType = typeNames[idx]
 	}
 
 	// Prompt for summary
-	summaryPrompt := promptui.Prompt{
-		Label: "Summary",
-		Validate: func(input string) error {
-			if strings.TrimSpace(input) == "" {
-				return fmt.Errorf("summary is required")
-			}
-			return nil
-		},
-	}
-	summary, err := summaryPrompt.Run()
+	summary, err := promptText("Summary", true)
 	if err != nil {
-		return handlePromptError(err)
+		if err == ErrPromptCancelled {
+			fmt.Println("\nCancelled.")
+			return nil
+		}
+		return err
 	}
 
 	// Prompt for description
-	descPrompt := promptui.Prompt{
-		Label: "Description (optional)",
-	}
-	description, err := descPrompt.Run()
+	description, err := promptText("Description (optional)", false)
 	if err != nil {
-		return handlePromptError(err)
+		if err == ErrPromptCancelled {
+			fmt.Println("\nCancelled.")
+			return nil
+		}
+		return err
+	}
+
+	// Determine epic link
+	var epicLink string
+	if cfg.IssueDefaults.EpicLink != "" {
+		epicLink = cfg.IssueDefaults.EpicLink
+	} else {
+		// Prompt for epic if not configured
+		epics, err := client.GetEpics(cfg.Project)
+		if err != nil {
+			// Non-fatal: just skip epic selection
+			fmt.Printf("Warning: could not fetch epics: %v\n", err)
+		} else if len(epics) > 0 {
+			epicItems := make([]string, len(epics)+1)
+			epicItems[0] = "(None)"
+			for i, epic := range epics {
+				epicSummary := ""
+				if epic.Fields != nil {
+					epicSummary = epic.Fields.Summary
+				}
+				if len(epicSummary) > 50 {
+					epicSummary = epicSummary[:47] + "..."
+				}
+				epicItems[i+1] = fmt.Sprintf("%s - %s", epic.Key, epicSummary)
+			}
+
+			idx, err := fzfSelect(epicItems, "Select epic (optional)")
+			if err != nil {
+				if err == fuzzyfinder.ErrAbort {
+					fmt.Println("\nCancelled.")
+					return nil
+				}
+				return err
+			}
+			if idx > 0 {
+				epicLink = epics[idx-1].Key
+			}
+		}
 	}
 
 	// Confirm creation
@@ -109,25 +139,28 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	if description != "" {
 		fmt.Printf("  Description: %s\n", description)
 	}
-
-	confirmPrompt := promptui.Prompt{
-		Label:     "Create this issue",
-		IsConfirm: true,
+	if epicLink != "" {
+		fmt.Printf("  Epic:        %s\n", epicLink)
 	}
-	_, err = confirmPrompt.Run()
+
+	confirmed, err := promptConfirm("Create this issue?")
 	if err != nil {
+		return err
+	}
+	if !confirmed {
 		fmt.Println("Issue creation cancelled.")
 		return nil
 	}
 
 	// Create the issue
-	issue, err := client.CreateIssue(cfg.Project, issueType, summary, description)
+	opts := &jira.CreateIssueOptions{EpicLink: epicLink}
+	issue, err := client.CreateIssue(cfg.Project, issueType, summary, description, opts)
 	if err != nil {
 		return fmt.Errorf("failed to create issue: %w", err)
 	}
 
 	fmt.Printf("\nCreated issue: %s\n", issue.Key)
-	fmt.Printf("URL: %s/browse/%s\n", cfg.Server, issue.Key)
+	fmt.Printf("%s/browse/%s\n", cfg.Server, issue.Key)
 
 	return nil
 }

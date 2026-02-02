@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/eugenetaranov/jiractl/internal/jira"
-	"github.com/manifoldco/promptui"
+	fuzzyfinder "github.com/ktr0731/go-fuzzyfinder"
 	"github.com/spf13/cobra"
 )
 
@@ -21,6 +21,8 @@ func init() {
 }
 
 func runQueryCmd(cmd *cobra.Command, args []string) error {
+	cmd.SilenceUsage = true
+
 	if len(args) == 0 {
 		return runQueryInteractive()
 	}
@@ -82,15 +84,9 @@ func runQuery(queryName string) error {
 		items[i] = fmt.Sprintf("%-12s %-15s %s", issue.Key, status, summary)
 	}
 
-	prompt := promptui.Select{
-		Label: fmt.Sprintf("Found %d issues (select to view details)", len(issues)),
-		Items: items,
-		Size:  15,
-	}
-
-	idx, _, err := prompt.Run()
+	idx, err := fzfSelect(items, fmt.Sprintf("Select issue (%d found)", len(issues)))
 	if err != nil {
-		if err == promptui.ErrInterrupt {
+		if err == fuzzyfinder.ErrAbort {
 			return nil
 		}
 		return fmt.Errorf("prompt failed: %w", err)
@@ -98,16 +94,17 @@ func runQuery(queryName string) error {
 
 	// Show selected issue details
 	selected := issues[idx]
-	return showIssueDetails(client, selected.Key)
+	return showIssueDetails(client, cfg.Server, selected.Key)
 }
 
-func showIssueDetails(client *jira.Client, key string) error {
+func showIssueDetails(client *jira.Client, server, key string) error {
 	issue, err := client.GetIssue(key)
 	if err != nil {
 		return fmt.Errorf("failed to get issue: %w", err)
 	}
 
 	fmt.Printf("\n%s: %s\n", issue.Key, issue.Fields.Summary)
+	fmt.Printf("%s/browse/%s\n", server, issue.Key)
 	fmt.Printf("─────────────────────────────────────────────────────────\n")
 
 	if issue.Fields.Status != nil {
