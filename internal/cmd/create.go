@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/eugenetaranov/jiractl/internal/config"
 	"github.com/eugenetaranov/jiractl/internal/jira"
@@ -84,7 +85,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Prompt for description
-	description, err := promptText("Description (optional)", false)
+	description, err := promptMultilineText("Description (optional)")
 	if err != nil {
 		if err == ErrPromptCancelled {
 			fmt.Println("\nCancelled.")
@@ -94,9 +95,13 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Determine epic link
-	var epicLink string
+	var epicLink, epicSummary string
 	if cfg.IssueDefaults.EpicLink != "" {
 		epicLink = cfg.IssueDefaults.EpicLink
+		// Fetch epic summary for display
+		if epic, err := client.GetIssue(epicLink); err == nil && epic.Fields != nil {
+			epicSummary = epic.Fields.Summary
+		}
 	} else {
 		// Prompt for epic if not configured
 		epics, err := client.GetEpics(cfg.Project)
@@ -107,14 +112,14 @@ func runCreate(cmd *cobra.Command, args []string) error {
 			epicItems := make([]string, len(epics)+1)
 			epicItems[0] = "(None)"
 			for i, epic := range epics {
-				epicSummary := ""
+				summary := ""
 				if epic.Fields != nil {
-					epicSummary = epic.Fields.Summary
+					summary = epic.Fields.Summary
 				}
-				if len(epicSummary) > 50 {
-					epicSummary = epicSummary[:47] + "..."
+				if len(summary) > 50 {
+					summary = summary[:47] + "..."
 				}
-				epicItems[i+1] = fmt.Sprintf("%s - %s", epic.Key, epicSummary)
+				epicItems[i+1] = fmt.Sprintf("%s - %s", epic.Key, summary)
 			}
 
 			idx, err := fzfSelect(epicItems, "Select epic (optional)")
@@ -127,6 +132,9 @@ func runCreate(cmd *cobra.Command, args []string) error {
 			}
 			if idx > 0 {
 				epicLink = epics[idx-1].Key
+				if epics[idx-1].Fields != nil {
+					epicSummary = epics[idx-1].Fields.Summary
+				}
 			}
 		}
 	}
@@ -137,10 +145,19 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Type:        %s\n", issueType)
 	fmt.Printf("  Summary:     %s\n", summary)
 	if description != "" {
-		fmt.Printf("  Description: %s\n", description)
+		lines := strings.Split(description, "\n")
+		if len(lines) == 1 && len(description) <= 50 {
+			fmt.Printf("  Description: %s\n", description)
+		} else {
+			fmt.Printf("  Description: (%d lines)\n", len(lines))
+		}
 	}
 	if epicLink != "" {
-		fmt.Printf("  Epic:        %s\n", epicLink)
+		if epicSummary != "" {
+			fmt.Printf("  Epic:        %s - %s\n", epicLink, epicSummary)
+		} else {
+			fmt.Printf("  Epic:        %s\n", epicLink)
+		}
 	}
 
 	confirmed, err := promptConfirm("Create this issue?")

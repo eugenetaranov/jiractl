@@ -64,6 +64,35 @@ func promptTextWithDefault(label, defaultVal string, required bool) (string, err
 	}
 }
 
+// promptMultilineText prompts for multiline text input. Empty line signals completion.
+func promptMultilineText(label string) (string, error) {
+	fmt.Printf("%s (empty line to finish):\n", label)
+
+	rl, err := readline.New("> ")
+	if err != nil {
+		return "", err
+	}
+	defer rl.Close()
+
+	var lines []string
+	for {
+		line, err := rl.Readline()
+		if err == readline.ErrInterrupt || err == io.EOF {
+			return "", ErrPromptCancelled
+		}
+		if err != nil {
+			return "", err
+		}
+
+		if line == "" {
+			break
+		}
+		lines = append(lines, line)
+	}
+
+	return strings.Join(lines, "\n"), nil
+}
+
 // promptConfirm prompts for y/n confirmation
 func promptConfirm(label string) (bool, error) {
 	rl, err := readline.New(label + " [y/N]: ")
