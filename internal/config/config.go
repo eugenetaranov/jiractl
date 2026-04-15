@@ -14,11 +14,12 @@ const (
 )
 
 type IssueDefaults struct {
-	Assignee  string   `toml:"assignee,omitempty"`
-	Component string   `toml:"component,omitempty"`
-	EpicLink  string   `toml:"epic_link,omitempty"`
-	IssueType string   `toml:"issue_type,omitempty"`
-	Labels    []string `toml:"labels,omitempty"`
+	Assignee     string            `toml:"assignee,omitempty"`
+	Component    string            `toml:"component,omitempty"`
+	EpicLink     string            `toml:"epic_link,omitempty"`
+	IssueType    string            `toml:"issue_type,omitempty"`
+	Labels       []string          `toml:"labels,omitempty"`
+	CustomFields map[string]string `toml:"custom_fields,omitempty"`
 }
 
 type Query struct {

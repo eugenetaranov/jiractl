@@ -159,6 +159,9 @@ func runCreate(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  Epic:        %s\n", epicLink)
 		}
 	}
+	for k, v := range cfg.IssueDefaults.CustomFields {
+		fmt.Printf("  %s: %s\n", k, v)
+	}
 
 	confirmed, err := promptConfirm("Create this issue?")
 	if err != nil {

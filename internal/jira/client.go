@@ -10,6 +10,7 @@ import (
 	jira "github.com/andygrunwald/go-jira"
 	"github.com/eugenetaranov/jiractl/internal/config"
 	"github.com/eugenetaranov/jiractl/internal/keyring"
+	"github.com/trivago/tgo/tcontainer"
 )
 
 type Client struct {
@@ -59,6 +60,21 @@ type CreateIssueOptions struct {
 	EpicLink string
 }
 
+// parseCustomFieldValue interprets a config string as JSON when it looks like
+// a JSON object/array, otherwise returns it as a plain string. This lets users
+// write select-list values as '{"value":"Operations"}' in TOML while still
+// supporting simple string fields.
+func parseCustomFieldValue(raw string) interface{} {
+	trimmed := strings.TrimSpace(raw)
+	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+		var v interface{}
+		if err := json.Unmarshal([]byte(trimmed), &v); err == nil {
+			return v
+		}
+	}
+	return raw
+}
+
 // CreateIssue creates a new issue in Jira
 func (c *Client) CreateIssue(project, issueType, summary, description string, opts *CreateIssueOptions) (*jira.Issue, error) {
 	issue := &jira.Issue{
@@ -95,6 +111,13 @@ func (c *Client) CreateIssue(project, issueType, summary, description string, op
 		// or a custom field like "customfield_10014" for classic projects.
 		// We'll use the parent field which works for next-gen/team-managed projects.
 		issue.Fields.Parent = &jira.Parent{Key: epicLink}
+	}
+
+	if len(c.config.IssueDefaults.CustomFields) > 0 {
+		issue.Fields.Unknowns = tcontainer.MarshalMap{}
+		for k, raw := range c.config.IssueDefaults.CustomFields {
+			issue.Fields.Unknowns[k] = parseCustomFieldValue(raw)
+		}
 	}
 
 	created, resp, err := c.Issue.Create(issue)
