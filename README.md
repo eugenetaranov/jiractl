@@ -7,7 +7,7 @@ A command-line interface for Jira with interactive menus, secure credential stor
 - Interactive menus for creating issues and running queries
 - Secure credential storage using system keyring (macOS Keychain, Windows Credential Manager, Linux Secret Service)
 - TOML configuration with saved JQL queries
-- Issue defaults for faster ticket creation
+- Issue defaults for faster ticket creation, including custom fields for required project-specific values
 
 ## Installation
 
@@ -106,6 +106,16 @@ assignee = "john.doe"
 component = "Backend"
 issue_type = "Task"
 labels = ["team-alpha"]
+
+# Custom fields applied to every created issue. Useful for required fields
+# like Work Allocation that your Jira project enforces. Keys are the Jira
+# custom field IDs (found in the error message when a create fails, or in
+# the field configuration). Values that look like JSON are parsed as JSON
+# so select-list fields can use the {"value": "..."} form; everything else
+# is sent as a plain string.
+[issue_defaults.custom_fields]
+customfield_15838 = '{"value": "Operations"}'
+customfield_10001 = "some text value"
 
 # My assigned open issues
 [[queries]]
