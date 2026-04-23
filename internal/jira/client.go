@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"os"
 	"strings"
 
 	jira "github.com/andygrunwald/go-jira"
@@ -194,18 +195,23 @@ type RawIssue struct {
 // GetIssueRaw fetches an issue with expand=names,schema so callers can see
 // every field (including customfield_*) with its human-readable name. Returns
 // both the decoded struct and the pretty-printed raw JSON body.
-func (c *Client) GetIssueRaw(key string) (*RawIssue, []byte, error) {
-	apiEndpoint := fmt.Sprintf("rest/api/3/issue/%s?expand=names,schema", url.PathEscape(key))
+func (c *Client) GetIssueRaw(key string, debug bool) (*RawIssue, []byte, error) {
+	apiEndpoint := fmt.Sprintf("rest/api/2/issue/%s?expand=names,schema", url.PathEscape(key))
 
 	req, err := c.NewRequest("GET", apiEndpoint, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
+	if debug {
+		fmt.Fprintf(os.Stderr, "DEBUG: GET %s\n", req.URL.String())
+	}
+
 	resp, err := c.Do(req, nil)
 	if err != nil {
 		if resp != nil {
-			return nil, nil, fmt.Errorf("failed to get issue (status %d): %w", resp.StatusCode, err)
+			body, _ := io.ReadAll(resp.Body)
+			return nil, nil, fmt.Errorf("failed to get issue (status %d): %s", resp.StatusCode, string(body))
 		}
 		return nil, nil, fmt.Errorf("failed to get issue: %w", err)
 	}
