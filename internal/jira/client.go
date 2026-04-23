@@ -182,6 +182,53 @@ func (c *Client) GetIssue(key string) (*jira.Issue, error) {
 	return issue, nil
 }
 
+// RawIssue holds the decoded JSON of an issue together with the field-name
+// and schema maps returned by the `expand=names,schema` query parameter.
+type RawIssue struct {
+	Key    string                 `json:"key"`
+	Fields map[string]interface{} `json:"fields"`
+	Names  map[string]string      `json:"names"`
+	Schema map[string]interface{} `json:"schema"`
+}
+
+// GetIssueRaw fetches an issue with expand=names,schema so callers can see
+// every field (including customfield_*) with its human-readable name. Returns
+// both the decoded struct and the pretty-printed raw JSON body.
+func (c *Client) GetIssueRaw(key string) (*RawIssue, []byte, error) {
+	apiEndpoint := fmt.Sprintf("rest/api/3/issue/%s?expand=names,schema", url.PathEscape(key))
+
+	req, err := c.NewRequest("GET", apiEndpoint, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.Do(req, nil)
+	if err != nil {
+		if resp != nil {
+			return nil, nil, fmt.Errorf("failed to get issue (status %d): %w", resp.StatusCode, err)
+		}
+		return nil, nil, fmt.Errorf("failed to get issue: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var raw RawIssue
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, body, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	pretty, err := json.MarshalIndent(json.RawMessage(body), "", "  ")
+	if err != nil {
+		pretty = body
+	}
+
+	return &raw, pretty, nil
+}
+
 // GetIssueTypes returns available issue types for a project
 func (c *Client) GetIssueTypes(projectKey string) ([]jira.IssueType, error) {
 	project, resp, err := c.Project.Get(projectKey)
