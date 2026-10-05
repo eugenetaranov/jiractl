@@ -80,6 +80,10 @@ Saving only changes the keys whose values changed, so comments and formatting in
 
 Interactively create a new Jira issue. Prompts for summary, description and epic. The issue type is asked only when `issue_defaults.issue_type` is not set; the epic only when `issue_defaults.epic_link` is not set.
 
+If the epic (from `issue_defaults.epic_link`, a draft, or your choice) doesn't exist or isn't an epic, `create` keeps what you typed and asks you to search for another one: type words such as `devops k8s` or a key, then pick from the matching epics, or choose `Skip: create without epic`. If the missing epic was your default, you're offered to save the new one as default. The epic picker also has a `Search all epics…` row for epics beyond the most recent ones.
+
+Use `jiractl create --no-epic` to create an issue without an epic, ignoring the default.
+
 The confirm step defaults to yes (`[Y/n]`). If you answer no, or Jira rejects the issue, what you typed is saved as a draft (`~/.local/state/jiractl/draft.json`) and the next `jiractl create` offers to resume it.
 
 ### `jiractl inspect <issue-url-or-key>`
@@ -214,6 +218,13 @@ Unknown keys in `~/.jiractl.toml` are reported as warnings on stderr, so a typo 
 | 130 | Cancelled with Ctrl+C, Ctrl+D or Esc |
 
 Warnings, progress messages and prompts go to stderr, so stdout can be piped.
+
+## Testing
+
+```bash
+go test ./...          # unit tests
+tests/e2e/run.sh       # end-to-end tests against a local Jira stub (needs expect, python3)
+```
 
 ## Building
 

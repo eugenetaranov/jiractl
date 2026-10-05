@@ -13,11 +13,13 @@ Today, `create.go` calls `GetIssue(epicLink)` only to show the summary, and igno
 ### Validate up front
 Start `GetIssue(epic)` in the background when create begins. The check fails when the issue is not found (404), is not an epic, or belongs to a different project and the user lacks access. If it fails, recovery runs right after the summary and description prompts, so typed text is never lost.
 
-### Search-as-you-type
-Use go-fuzzyfinder with `WithHotReloadLock`. The item slice is updated from a debounced (250 ms) server search:
-`project = P AND issuetype = Epic AND (summary ~ "w1*" AND summary ~ "w2*" OR key = "<input>") ORDER BY resolution ASC, updated DESC`, `maxResults=50`.
-Unresolved epics come first; resolved ones are marked `[done]`. Each search word must match the summary, and a word that looks like a key also matches the key. Fixed rows at the top: `Skip: create without epic`, then the matches.
-- Alternative: a prompt for the search text, then a picker. Simpler, but the user can't refine the search without starting over. If hot reload turns out to be unreliable, we use this instead.
+### Search prompt, then picker
+go-fuzzyfinder doesn't expose the text being typed, so the picker can't query Jira on every keystroke. Instead:
+1. A prompt asks `Search epics (words or key, Enter for open epics)`.
+2. Jira is searched with `project = P AND issuetype = Epic AND (summary ~ "w1*" AND summary ~ "w2*") [OR key = "<input>"] ORDER BY updated DESC`, `maxResults=50`. Unresolved epics are sorted first; resolved ones are marked `[done]`. If the wildcard query returns 400, the search is retried without wildcards.
+3. A picker shows `Skip: create without epic`, `Search again…`, then the matches. The picker still fuzzy-filters the results locally.
+
+The regular epic picker (no default) gets a `Search all epics…` row, which leads into the same search.
 
 ### After choosing
 - An epic is picked and it came from the config default: ask `Save <KEY> as default epic? [y/N]`. Yes updates `epic_link` through the config patcher.

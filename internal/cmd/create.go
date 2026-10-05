@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	jiralib "github.com/andygrunwald/go-jira"
 	"github.com/eugenetaranov/jiractl/internal/config"
 	"github.com/eugenetaranov/jiractl/internal/jira"
 	"github.com/eugenetaranov/jiractl/internal/textutil"
@@ -18,8 +19,27 @@ var createCmd = &cobra.Command{
 	RunE:  runCreate,
 }
 
+var createNoEpic bool
+
 func init() {
+	createCmd.Flags().BoolVar(&createNoEpic, "no-epic", false, "Create the issue without an epic, ignoring the default")
 	RootCmd.AddCommand(createCmd)
+}
+
+type epicCheckResult struct {
+	state jira.EpicState
+	issue *jiralib.Issue
+	err   error
+}
+
+// startEpicCheck looks the epic up in the background so the prompts don't wait.
+func startEpicCheck(client *jira.Client, key string) <-chan epicCheckResult {
+	ch := make(chan epicCheckResult, 1)
+	go func() {
+		state, issue, err := client.CheckEpic(key)
+		ch <- epicCheckResult{state, issue, err}
+	}()
+	return ch
 }
 
 func loadConfig() (*config.Config, error) {
@@ -44,6 +64,15 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	defaultEpic := cfg.IssueDefaults.EpicLink
+	if createNoEpic {
+		defaultEpic = ""
+	}
+	var defaultCheck <-chan epicCheckResult
+	if defaultEpic != "" {
+		defaultCheck = startEpicCheck(client, defaultEpic)
+	}
+
 	draft := &issueDraft{Project: cfg.Project}
 	resumed := false
 	if saved := loadDraft(); saved != nil && saved.Project == cfg.Project {
@@ -60,19 +89,38 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	if !resumed {
-		if err := promptNewIssue(cfg, client, draft); err != nil {
+		if err := promptNewIssue(cfg, client, draft, defaultEpic); err != nil {
 			return err
 		}
 	}
+	if createNoEpic {
+		draft.EpicLink = ""
+	}
 
-	epicSummary := ""
+	// Make sure the epic can be used before anything is sent.
+	var epic *jiralib.Issue
 	if draft.EpicLink != "" {
-		if epic, err := client.GetIssue(draft.EpicLink); err == nil && epic.Fields != nil {
-			epicSummary = epic.Fields.Summary
+		var res epicCheckResult
+		if defaultCheck != nil && draft.EpicLink == defaultEpic {
+			res = <-defaultCheck
+		} else {
+			res.state, res.issue, res.err = client.CheckEpic(draft.EpicLink)
+		}
+		if problem := epicProblem(res.state); problem != "" {
+			epic, err = recoverEpic(cfg, client, draft, problem, draft.EpicLink == cfg.IssueDefaults.EpicLink)
+			if err != nil {
+				keepDraft(draft)
+				return err
+			}
+		} else {
+			if res.err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not check epic %s: %v\n", draft.EpicLink, res.err)
+			}
+			epic = res.issue
 		}
 	}
 
-	printReview(cfg, draft, epicSummary)
+	printReview(cfg, draft, epicSummary(epic))
 
 	confirmed, err := promptConfirm("Create this issue?", true)
 	if err != nil {
@@ -84,9 +132,22 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		return ErrCancelled
 	}
 
-	opts := &jira.CreateIssueOptions{EpicLink: draft.EpicLink}
-	issue, err := client.CreateIssue(cfg.Project, draft.IssueType, draft.Summary, draft.Description, opts)
-	if err != nil {
+	var issue *jiralib.Issue
+	for attempt := 0; ; attempt++ {
+		opts := &jira.CreateIssueOptions{EpicLink: draft.EpicLink}
+		issue, err = client.CreateIssue(cfg.Project, draft.IssueType, draft.Summary, draft.Description, opts)
+		if err == nil {
+			break
+		}
+		// Jira can still refuse the epic as parent; let the user pick again.
+		if attempt < 2 && draft.EpicLink != "" && jira.IsEpicRejection(err) && isInteractive() {
+			problem := fmt.Sprintf("was rejected by Jira (%v)", err)
+			if _, rerr := recoverEpic(cfg, client, draft, problem, draft.EpicLink == cfg.IssueDefaults.EpicLink); rerr != nil {
+				keepDraft(draft)
+				return rerr
+			}
+			continue
+		}
 		keepDraft(draft)
 		return fmt.Errorf("failed to create issue: %w", err)
 	}
@@ -99,7 +160,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 }
 
 // promptNewIssue asks for type, summary, description and epic.
-func promptNewIssue(cfg *config.Config, client *jira.Client, draft *issueDraft) error {
+func promptNewIssue(cfg *config.Config, client *jira.Client, draft *issueDraft, defaultEpic string) error {
 	if cfg.IssueDefaults.IssueType != "" {
 		draft.IssueType = cfg.IssueDefaults.IssueType
 	} else {
@@ -130,31 +191,20 @@ func promptNewIssue(cfg *config.Config, client *jira.Client, draft *issueDraft) 
 	}
 	draft.Description = description
 
-	if cfg.IssueDefaults.EpicLink != "" {
-		draft.EpicLink = cfg.IssueDefaults.EpicLink
+	if createNoEpic {
+		return nil
+	}
+	if defaultEpic != "" {
+		draft.EpicLink = defaultEpic
 		return nil
 	}
 
-	epics, err := client.GetEpics(cfg.Project)
-	if err != nil {
-		// Non-fatal: just skip epic selection
-		fmt.Fprintf(os.Stderr, "Warning: could not fetch epics: %v\n", err)
-		return nil
-	}
-	if len(epics) == 0 {
-		return nil
-	}
-	epicItems := make([]string, len(epics)+1)
-	epicItems[0] = "(None)"
-	for i, epic := range epics {
-		epicItems[i+1] = epicLabel(epic)
-	}
-	idx, err := fzfSelect(epicItems, "Select epic (optional)")
+	epic, err := pickEpic(client, cfg.Project)
 	if err != nil {
 		return err
 	}
-	if idx > 0 {
-		draft.EpicLink = epics[idx-1].Key
+	if epic != nil {
+		draft.EpicLink = epic.Key
 	}
 	return nil
 }
@@ -173,12 +223,13 @@ func printReview(cfg *config.Config, draft *issueDraft, epicSummary string) {
 			fmt.Fprintf(w, "  Description: (%d lines)\n", len(lines))
 		}
 	}
-	if draft.EpicLink != "" {
-		if epicSummary != "" {
-			fmt.Fprintf(w, "  Epic:        %s - %s\n", draft.EpicLink, epicSummary)
-		} else {
-			fmt.Fprintf(w, "  Epic:        %s\n", draft.EpicLink)
-		}
+	switch {
+	case draft.EpicLink == "":
+		fmt.Fprintf(w, "  Epic:        (none)\n")
+	case epicSummary != "":
+		fmt.Fprintf(w, "  Epic:        %s - %s\n", draft.EpicLink, epicSummary)
+	default:
+		fmt.Fprintf(w, "  Epic:        %s\n", draft.EpicLink)
 	}
 	d := cfg.IssueDefaults
 	if d.Assignee != "" {

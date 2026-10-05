@@ -121,12 +121,11 @@ func (c *Client) CreateIssue(project, issueType, summary, description string, op
 		issue.Fields.Labels = c.config.IssueDefaults.Labels
 	}
 
-	// Apply epic link if provided
+	// Apply epic link if provided. The caller decides whether the configured
+	// default applies, so "create without epic" really means no epic.
 	epicLink := ""
-	if opts != nil && opts.EpicLink != "" {
+	if opts != nil {
 		epicLink = opts.EpicLink
-	} else if c.config.IssueDefaults.EpicLink != "" {
-		epicLink = c.config.IssueDefaults.EpicLink
 	}
 
 	if epicLink != "" {
@@ -160,7 +159,7 @@ func (c *Client) SearchIssues(jql string, maxResults int) ([]jira.Issue, error) 
 
 	// Use the v3 search/jql endpoint
 	apiEndpoint := fmt.Sprintf(
-		"rest/api/3/search/jql?jql=%s&maxResults=%d&fields=key,summary,status,assignee,priority,created,updated",
+		"rest/api/3/search/jql?jql=%s&maxResults=%d&fields=key,summary,status,assignee,priority,created,updated,resolution,issuetype",
 		url.QueryEscape(jql),
 		maxResults,
 	)

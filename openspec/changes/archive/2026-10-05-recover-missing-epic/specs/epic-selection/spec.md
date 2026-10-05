@@ -12,14 +12,14 @@ When the epic for a new issue does not exist or can't be used, interactive `crea
 - **THEN** the epic search opens, and after a choice the request is sent again without re-entering other fields
 
 ### Requirement: Search epics by keywords
-The epic search SHALL query Jira for epics in the project whose summary matches every typed word, or whose key matches the input. Results SHALL update as the user types, with unresolved epics listed first.
+The epic search SHALL ask for search words and query Jira for epics in the project whose summary matches every word, or whose key matches the input. Results SHALL be shown in a picker with unresolved epics listed first, and the picker SHALL offer to search again.
 
 #### Scenario: Keyword search
-- **WHEN** the user types `devops k8s`
+- **WHEN** the user enters `devops k8s` at the search prompt
 - **THEN** the picker lists epics whose summaries contain words starting with `devops` and `k8s`, such as `OPS-40 DevOps: k8s cluster upgrade`
 
 #### Scenario: Search by key
-- **WHEN** the user types `OPS-40`
+- **WHEN** the user enters `OPS-40` at the search prompt
 - **THEN** OPS-40 is listed
 
 ### Requirement: Skip epic
