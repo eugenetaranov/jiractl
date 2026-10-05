@@ -35,8 +35,15 @@ echo "==> Release $TAG"
 command -v gh >/dev/null || { echo "error: gh CLI is required" >&2; exit 1; }
 
 # 1. Release workflow for the tag
-RUN_ID=$(gh run list -R "$REPO" --workflow Release --branch "$TAG" -L 1 \
-  --json databaseId -q '.[0].databaseId // empty')
+# GitHub's branch filter on the runs API sometimes returns nothing for a tag
+# that has a run, so list recent Release runs, match the tag here, and retry.
+RUN_ID=""
+for _ in 1 2 3 4 5; do
+  RUN_ID=$(gh run list -R "$REPO" --workflow Release -L 30 --json databaseId,headBranch \
+    -q "map(select(.headBranch == \"$TAG\")) | .[0].databaseId // empty" </dev/null) || RUN_ID=""
+  [ -n "$RUN_ID" ] && break
+  sleep 3
+done
 if [ -z "$RUN_ID" ]; then
   # The run lookup only serves to wait for an in-flight release; the release
   # and tap checks below still verify the result, so carry on.
