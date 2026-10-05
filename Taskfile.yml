@@ -1,0 +1,125 @@
+# https://taskfile.dev
+version: '3'
+
+vars:
+  BINARY: jiractl
+  BUILD_DIR: bin
+  VERSION:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+  COMMIT:
+    sh: git rev-parse --short HEAD 2>/dev/null || echo unknown
+  DATE:
+    sh: date -u +"%Y-%m-%dT%H:%M:%SZ"
+  LDFLAGS: -X main.version={{.VERSION}} -X main.commit={{.COMMIT}} -X main.date={{.DATE}}
+
+tasks:
+  default:
+    desc: Show available tasks
+    silent: true
+    cmds:
+      - task --list
+
+  build:
+    desc: Build the binary
+    cmds:
+      - mkdir -p {{.BUILD_DIR}}
+      - go build -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/{{.BINARY}} ./cmd/jiractl
+
+  build-all:
+    desc: Build for linux and darwin, amd64 and arm64
+    cmds:
+      - mkdir -p {{.BUILD_DIR}}
+      - |
+        for os in linux darwin; do
+          for arch in amd64 arm64; do
+            echo "building $os/$arch"
+            GOOS=$os GOARCH=$arch go build -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/{{.BINARY}}-$os-$arch ./cmd/jiractl
+          done
+        done
+
+  test:
+    desc: Run unit tests
+    cmds:
+      - go test -v -short ./...
+
+  test-coverage:
+    desc: Run tests with coverage report
+    cmds:
+      - go test -short -coverprofile=coverage.out ./...
+      - go tool cover -html=coverage.out -o coverage.html
+
+  test-e2e:
+    desc: Run end-to-end tests against a local Jira stub (needs expect, python3)
+    cmds:
+      - tests/e2e/run.sh
+
+  lint:
+    desc: Run linter
+    cmds:
+      - golangci-lint run
+
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - rm -rf {{.BUILD_DIR}}
+      - rm -f coverage.out coverage.html
+
+  run:
+    desc: Run jiractl directly via go run (pass args after --)
+    cmds:
+      - go run ./cmd/jiractl {{.CLI_ARGS}}
+
+  install:
+    desc: Build and install to /usr/local/bin
+    deps: [build]
+    cmds:
+      - cp {{.BUILD_DIR}}/{{.BINARY}} /usr/local/bin/
+
+  deps:
+    desc: Tidy module dependencies
+    cmds:
+      - go mod tidy
+
+  release:
+    desc: Create and push a release tag (TAG=vX.Y.Z, prompts with a suggestion when omitted)
+    interactive: true
+    cmds:
+      - |
+        TAG="{{.TAG}}"
+        if [ -z "$TAG" ]; then
+          LATEST=$(git tag --sort=-version:refname 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+          if [ -z "$LATEST" ]; then
+            SUGGESTED="v0.1.0"
+          else
+            IFS=. read -r MAJOR MINOR PATCH <<< "${LATEST#v}"
+            SUGGESTED="v$MAJOR.$MINOR.$((PATCH + 1))"
+          fi
+          echo "Latest tag: ${LATEST:-none}"
+          printf "Enter tag [%s]: " "$SUGGESTED"
+          read -r INPUT_TAG
+          TAG="${INPUT_TAG:-$SUGGESTED}"
+        fi
+        echo "Creating release $TAG..."
+        git tag -a "$TAG" -m "Release $TAG"
+        git push origin "$TAG"
+        echo "Release $TAG pushed. GitHub Actions will build and publish artifacts."
+
+  upgrade-local:
+    desc: Wait for a release (TAG=vX.Y.Z, default latest), verify the brew formula, upgrade local install
+    cmds:
+      - scripts/upgrade-local.sh {{.TAG}}
+
+  release-dry-run:
+    desc: Test release without publishing
+    cmds:
+      - goreleaser release --snapshot --clean --skip=publish
+
+  release-snapshot:
+    desc: Create snapshot release
+    cmds:
+      - goreleaser release --snapshot --clean
+
+  release-check:
+    desc: Check GoReleaser configuration
+    cmds:
+      - goreleaser check

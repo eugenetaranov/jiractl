@@ -29,8 +29,8 @@ brew install jiractl
 ```bash
 git clone https://github.com/eugenetaranov/jiractl.git
 cd jiractl
-make build
-make install  # copies to /usr/local/bin
+task build
+task install  # copies to /usr/local/bin
 ```
 
 ### Go Install
@@ -306,19 +306,32 @@ Warnings, progress messages and prompts go to stderr, so stdout can be piped.
 ## Testing
 
 ```bash
-go test ./...          # unit tests
-tests/e2e/run.sh       # end-to-end tests against a local Jira stub (needs expect, python3)
+task test         # unit tests
+task test-e2e     # end-to-end tests against a local Jira stub (needs expect, python3)
+task lint         # golangci-lint
 ```
 
 ## Building
 
+Development tasks use [Task](https://taskfile.dev) (`brew install go-task`); `task` lists them all.
+
 ```bash
-make build         # Build for current platform
-make build-all     # Build for all platforms
-make test          # Run tests
-make lint          # Run linter
-make clean         # Clean build artifacts
+task build         # Build for current platform (bin/jiractl)
+task build-all     # Build for linux/darwin, amd64/arm64
+task run -- query mine   # go run with arguments
+task clean         # Clean build artifacts
 ```
+
+## Releasing
+
+```bash
+task release                 # tag and push (suggests the next patch version); CI publishes
+task release TAG=v0.3.0      # explicit tag
+task upgrade-local           # wait for the release, check the Homebrew formula, brew upgrade
+task upgrade-local TAG=v0.3.0
+```
+
+`upgrade-local` waits for the tag's Release workflow, checks that the GitHub release and the `eugenetaranov/homebrew-tap` formula are at that version, then installs or upgrades `jiractl` with Homebrew and verifies `jiractl --version`. It needs the `gh` CLI; without Homebrew it only runs the checks. It warns when another `jiractl` earlier on your `PATH` (such as `~/go/bin/jiractl`) shadows the Homebrew one.
 
 ## License
 
