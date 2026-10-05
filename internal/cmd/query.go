@@ -11,7 +11,6 @@ import (
 	"time"
 
 	jiralib "github.com/andygrunwald/go-jira"
-	"github.com/atotto/clipboard"
 	"github.com/eugenetaranov/jiractl/internal/config"
 	"github.com/eugenetaranov/jiractl/internal/jira"
 	"github.com/eugenetaranov/jiractl/internal/textutil"
@@ -77,38 +76,11 @@ func runQueryCmd(cmd *cobra.Command, args []string) error {
 		if queryOpts.output != "" || !stdoutIsTerminal() {
 			return fmt.Errorf("query name required; available: %s", strings.Join(cfg.QueryNames(), ", "))
 		}
-		if q, err = pickQuery(cfg); err != nil {
-			return err
-		}
+		return tui.RunApp(&queryPickScreen{cfg: cfg, list: tui.NewList("queries", cfg.QueryNames(), tui.SelectOptions{Header: "Select query"})}, nil)
 	} else if q, err = cfg.FindQuery(args[0]); err != nil {
 		return err
 	}
 	return executeQuery(cfg, q.Name, cfg.ExpandJQL(q.JQL), q.Limit, queryOpts.output)
-}
-
-func pickQuery(cfg *config.Config) (*config.Query, error) {
-	if len(cfg.Queries) == 0 {
-		return nil, fmt.Errorf("no queries configured; add [[queries]] to ~/%s", config.ConfigFileName)
-	}
-	names := cfg.QueryNames()
-	idx, err := fzfSelect(names, "Select query")
-	if err != nil {
-		return nil, err
-	}
-	return &cfg.Queries[idx], nil
-}
-
-// runQueryInteractive is the "Run query" menu entry.
-func runQueryInteractive() error {
-	cfg, err := loadConfig()
-	if err != nil {
-		return err
-	}
-	q, err := pickQuery(cfg)
-	if err != nil {
-		return err
-	}
-	return executeQuery(cfg, q.Name, cfg.ExpandJQL(q.JQL), q.Limit, "")
 }
 
 func executeQuery(cfg *config.Config, title, jql string, limit int, output string) error {
@@ -153,10 +125,9 @@ func executeQuery(cfg *config.Config, title, jql string, limit int, output strin
 
 	if len(issues) == 0 {
 		fmt.Fprintln(os.Stderr, "No issues found.")
-		menuStatus = fmt.Sprintf("No issues found for %q", title)
 		return nil
 	}
-	return browseIssues(client, cfg, issues, fmt.Sprintf("%s (%d found)", title, len(issues)))
+	return tui.RunApp(newResultsScreen(cfg, client, title, issues), nil)
 }
 
 type issueJSON struct {
@@ -269,120 +240,6 @@ func issuePreview(is jiralib.Issue, width, height int) string {
 }
 
 var issueActions = []string{"Open in browser", "Copy key", "Transition", "Assign to me", "Comment", "Back"}
-
-// browseIssues shows results with a preview pane. Enter opens the actions
-// menu; Esc leaves the list (not a cancel: browsing is the point here).
-func browseIssues(client *jira.Client, cfg *config.Config, issues []jiralib.Issue, header string) error {
-	for {
-		rows := make([]string, len(issues))
-		for i := range issues {
-			rows[i] = issueRow(issues[i])
-		}
-		idx, err := tui.Select(rows, tui.SelectOptions{
-			Header:  header,
-			MaxRows: 15,
-			Preview: func(i, w, h int) string { return issuePreview(issues[i], w, h) },
-		})
-		if tui.IsEsc(err) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-
-		for {
-			is := issues[idx]
-			a, err := fzfSelect(issueActions, textutil.Truncate(is.Key+": "+fieldSummary(is), 70))
-			if tui.IsEsc(err) || (err == nil && issueActions[a] == "Back") {
-				break
-			}
-			if err != nil {
-				return err
-			}
-
-			changed, err := runIssueAction(client, cfg, is.Key, issueActions[a])
-			if tui.IsEsc(err) {
-				continue
-			}
-			if errors.Is(err, ErrCancelled) {
-				return err
-			}
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				continue
-			}
-			if changed {
-				if fresh, err := client.SearchIssues(fmt.Sprintf("key = %s", is.Key), 1); err == nil && len(fresh) == 1 {
-					issues[idx] = fresh[0]
-				}
-			}
-		}
-	}
-}
-
-// runIssueAction performs an action and reports whether the issue changed.
-func runIssueAction(client *jira.Client, cfg *config.Config, key, action string) (bool, error) {
-	url := fmt.Sprintf("%s/browse/%s", cfg.Server, key)
-	switch action {
-	case "Open in browser":
-		if err := openBrowser(url); err != nil {
-			fmt.Fprintf(os.Stderr, "Could not open a browser (%v): %s\n", err, url)
-		}
-		return false, nil
-	case "Copy key":
-		if err := clipboard.WriteAll(key); err != nil {
-			fmt.Fprintf(os.Stderr, "Clipboard unavailable (%v); key: %s\n", err, key)
-		} else {
-			fmt.Fprintf(os.Stderr, "Copied %s\n", key)
-		}
-		return false, nil
-	case "Transition":
-		transitions, err := client.GetTransitions(key)
-		if err != nil {
-			return false, err
-		}
-		if len(transitions) == 0 {
-			fmt.Fprintf(os.Stderr, "No transitions available for %s\n", key)
-			return false, nil
-		}
-		names := make([]string, len(transitions))
-		for i, t := range transitions {
-			names[i] = t.Name
-			if t.To.Name != "" && t.To.Name != t.Name {
-				names[i] += " → " + t.To.Name
-			}
-		}
-		idx, err := fzfSelect(names, "Transition "+key)
-		if err != nil {
-			return false, err
-		}
-		if err := client.DoTransition(key, transitions[idx].ID); err != nil {
-			return false, err
-		}
-		fmt.Fprintf(os.Stderr, "%s: %s\n", key, names[idx])
-		return true, nil
-	case "Assign to me":
-		if err := client.AssignToMe(key); err != nil {
-			return false, err
-		}
-		fmt.Fprintf(os.Stderr, "%s assigned to you\n", key)
-		return true, nil
-	case "Comment":
-		text, err := promptMultilineText("Comment on " + key)
-		if err != nil {
-			return false, err
-		}
-		if strings.TrimSpace(text) == "" {
-			return false, nil
-		}
-		if err := client.AddComment(key, text); err != nil {
-			return false, err
-		}
-		fmt.Fprintf(os.Stderr, "Comment added to %s\n", key)
-		return true, nil
-	}
-	return false, nil
-}
 
 func openBrowser(url string) error {
 	var cmd *exec.Cmd

@@ -71,24 +71,16 @@ func runConfigure(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	epics, err := creds.client.GetEpics(updated.Project)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not fetch epics: %v\n", err)
-	} else if len(epics) > 0 {
-		epicItems := make([]string, len(epics)+1)
-		epicItems[0] = "(None)"
-		for i, epic := range epics {
-			epicItems[i+1] = epicLabel(epic)
+	// Default epic, searched live; Esc keeps the current one.
+	_, epic, err := chooseEpic(creds.client, updated.Project, "Select default epic (Esc keeps current)", []string{"(None)"})
+	switch {
+	case err == nil:
+		updated.IssueDefaults.EpicLink = ""
+		if epic != nil {
+			updated.IssueDefaults.EpicLink = epic.Key
 		}
-		idx, err := fzfSelect(epicItems, "Select default epic (Esc keeps current)")
-		switch {
-		case err == nil && idx > 0:
-			updated.IssueDefaults.EpicLink = epics[idx-1].Key
-		case err == nil:
-			updated.IssueDefaults.EpicLink = ""
-		case !tui.IsEsc(err):
-			return err
-		}
+	case !tui.IsEsc(err):
+		return err
 	}
 
 	addedQueries := false
@@ -116,7 +108,6 @@ func runConfigure(cmd *cobra.Command, args []string) error {
 	if addedQueries {
 		fmt.Printf("  Queries:            added %s (try 'jiractl query mine')\n", strings.Join(updated.QueryNames(), ", "))
 	}
-	menuStatus = "Configuration saved"
 	runPostConfigureDoctor()
 	return nil
 }

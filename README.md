@@ -62,11 +62,11 @@ jiractl query "My Open Issues"  # Run a specific query
 
 ### `jiractl`
 
-Launches an interactive menu with options to create issues, run queries, or configure settings. After each action you're back in the menu (the result of the last action is shown in its header); Esc or Exit leaves.
+Launches a full-screen app: the main menu, query results with a preview pane, and actions on issues. A header line shows your default epic (and warns when Jira rejects your stored token); a status bar shows the result of the last action, or the last error with a hint on what to fix. Create, Configure and Change default epic run their own prompts and bring you back to the app when done. Esc goes back; Esc on the menu or Exit leaves.
 
 Before setup, any interactive command offers to run `jiractl configure` first and then continues with what you asked for.
 
-The menu header always shows your default epic, e.g. `Default epic: OPS-40 DevOps k8s cluster upgrade`, `Default epic: none`, or `OPS-12 (not found)` / `(done)` when it can no longer be used. **Change default epic** picks a new one from the open epics (or `Search all epics…`), or `None: no default epic` to clear it. It only changes `issue_defaults.epic_link`; Esc leaves it as is. The create review also marks an epic that came from your config as `(default)`.
+The header always shows your default epic, e.g. `Default epic: OPS-40 DevOps k8s cluster upgrade`, `Default epic: none`, or `OPS-12 (not found)` / `(done)` when it can no longer be used. **Change default epic** opens the epic search with your current default first (Enter keeps it) and `None: no default epic` to clear it. It only changes `issue_defaults.epic_link`; Esc leaves it as is. The create review also marks an epic that came from your config as `(default)`.
 
 ### `jiractl configure`
 
@@ -100,7 +100,7 @@ Before anything is sent, every field is listed with its Jira name (`Story Points
 
 If you answer no, or Jira rejects the issue, what you typed is saved as a draft (`~/.local/state/jiractl/draft.json`) and the next `jiractl create` offers to resume it.
 
-If the epic (from `issue_defaults.epic_link`, a draft, or your choice) doesn't exist or isn't an epic, `create` keeps what you typed and asks you to search for another one: type words such as `devops k8s` or a key, then pick from the matching epics, or choose `Skip: create without epic`. If the missing epic was your default, you're offered to save the new one as default. The epic picker also has a `Search all epics…` row for epics beyond the most recent ones.
+If the epic (from `issue_defaults.epic_link`, a draft, or your choice) doesn't exist or isn't an epic, `create` keeps what you typed and opens the epic search with `Skip: create without epic` first. Every epic picker searches Jira as you type: words such as `devops k8s` (each must match the summary) or a key such as `OPS-40`. The cursor jumps to the first match, so Enter picks it. If the missing epic was your default, you're offered to save the new one as default.
 
 #### Scripting
 
@@ -328,7 +328,7 @@ Error: query "mine" failed: Jira rejected your credentials (401): the API token 
   → Create a new API token at https://id.atlassian.com/manage-profile/security/api-tokens, then run 'jiractl configure' (or pick Configure in the menu).
 ```
 
-In the menu, a failed action shows the same message and waits for Enter instead of returning to the menu straight away, and the menu header warns when Jira rejects your stored token.
+In the app, a failed action shows the same message and hint in the status bar, and the header warns when Jira rejects your stored token.
 
 ## Testing
 

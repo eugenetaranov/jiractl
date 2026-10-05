@@ -69,7 +69,6 @@ type epicCheckResult struct {
 // background as soon as the command starts.
 type createPrefetch struct {
 	issueTypes  *pending[[]jiralib.IssueType]
-	epics       *pending[[]jiralib.Issue]
 	fields      *pending[*fieldNames]
 	defaultEpic *pending[epicCheckResult]
 	assignee    *pending[string]
@@ -78,7 +77,6 @@ type createPrefetch struct {
 func startPrefetch(cfg *config.Config, client *jira.Client, epicKey, assignee string) *createPrefetch {
 	pf := &createPrefetch{
 		issueTypes: fetch(func() ([]jiralib.IssueType, error) { return client.GetIssueTypes(cfg.Project) }),
-		epics:      fetch(func() ([]jiralib.Issue, error) { return client.GetEpics(cfg.Project) }),
 		fields: fetch(func() (*fieldNames, error) {
 			fields, err := client.GetFields()
 			if err != nil {
@@ -124,18 +122,20 @@ func applyDefaults(draft *issueDraft, cfg *config.Config) {
 	draft.DefaultsApplied = true
 }
 
-func runCreate(cmd *cobra.Command, args []string) error {
+// createIssueFlow runs create (prompts, review, request) and returns the
+// new issue and whether it ran interactively.
+func createIssueFlow() (issue *jiralib.Issue, interactive bool, err error) {
 	cfg, err := loadConfig()
 	if err != nil {
-		return err
+		return nil, interactive, err
 	}
 	client, err := jira.NewClient(cfg)
 	if err != nil {
-		return err
+		return nil, interactive, err
 	}
 
 	o := createOpts
-	interactive := !o.yes && isInteractive()
+	interactive = !o.yes && isInteractive()
 	if o.description == "-" {
 		// stdin carries the description, so it can't also answer prompts.
 		interactive = false
@@ -156,7 +156,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 			label := fmt.Sprintf("Resume draft %q from %s?", textutil.Truncate(saved.Summary, 40), saved.SavedAt.Format("Jan 2 15:04"))
 			resume, err := promptConfirm(label, true)
 			if err != nil {
-				return err
+				return nil, interactive, err
 			}
 			if resume {
 				draft, resumed = saved, true
@@ -168,22 +168,22 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	applyDefaults(draft, cfg)
 
 	if err := applyCreateFlags(draft, o, pf); err != nil {
-		return err
+		return nil, interactive, err
 	}
 
 	if interactive {
 		if err := promptMissing(cfg, client, draft, pf, resumed, o); err != nil {
-			return err
+			return nil, interactive, err
 		}
 	}
 	if draft.Summary == "" {
-		return errors.New("summary required: pass -s")
+		return nil, interactive, errors.New("summary required: pass -s")
 	}
 	if draft.IssueType == "" {
-		return errors.New("issue type required: pass -t or set issue_defaults.issue_type")
+		return nil, interactive, errors.New("issue type required: pass -t or set issue_defaults.issue_type")
 	}
 	if err := normalizeIssueType(draft, pf, interactive); err != nil {
-		return err
+		return nil, interactive, err
 	}
 
 	// Make sure the epic can be used before anything is sent.
@@ -199,7 +199,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 			epic, err = recoverEpic(cfg, client, draft, problem, draft.EpicLink == cfg.IssueDefaults.EpicLink, interactive)
 			if err != nil {
 				keepDraft(draft)
-				return err
+				return nil, interactive, err
 			}
 		} else {
 			if res.err != nil {
@@ -215,15 +215,14 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		confirmed, err := reviewLoop(cfg, client, draft, pf, names, &epic)
 		if err != nil {
 			keepDraft(draft)
-			return err
+			return nil, interactive, err
 		}
 		if !confirmed {
 			keepDraft(draft)
-			return ErrCancelled
+			return nil, interactive, ErrCancelled
 		}
 	}
 
-	var issue *jiralib.Issue
 	for attempt := 0; ; attempt++ {
 		payload, err := buildPayload(cfg, client, draft, pf)
 		if err == nil {
@@ -237,17 +236,24 @@ func runCreate(cmd *cobra.Command, args []string) error {
 			problem := fmt.Sprintf("was rejected by Jira (%v)", err)
 			if _, rerr := recoverEpic(cfg, client, draft, problem, draft.EpicLink == cfg.IssueDefaults.EpicLink, interactive); rerr != nil {
 				keepDraft(draft)
-				return rerr
+				return nil, interactive, rerr
 			}
 			continue
 		}
 		keepDraft(draft)
-		return fmt.Errorf("failed to create issue: %w", err)
+		return nil, interactive, fmt.Errorf("failed to create issue: %w", err)
 	}
 	deleteDraft()
+	return issue, interactive, nil
+}
 
+func runCreate(cmd *cobra.Command, args []string) error {
+	issue, interactive, err := createIssueFlow()
+	if err != nil {
+		return err
+	}
+	cfg, _ := config.Load()
 	url := fmt.Sprintf("%s/browse/%s", cfg.Server, issue.Key)
-	menuStatus = fmt.Sprintf("Created %s  %s", issue.Key, url)
 	if interactive {
 		fmt.Printf("\nCreated issue: %s\n%s\n", issue.Key, url)
 	} else {
@@ -329,8 +335,8 @@ func promptMissing(cfg *config.Config, client *jira.Client, draft *issueDraft, p
 	}
 
 	if draft.EpicLink == "" && !o.noEpic && o.epic == "" {
-		epic, err := pickEpic(client, cfg.Project, pf.epics)
-		if err != nil {
+		epic, err := pickEpic(client, cfg.Project)
+		if err != nil && !tui.IsEsc(err) {
 			return err
 		}
 		if epic != nil {
@@ -551,7 +557,7 @@ func editField(cfg *config.Config, client *jira.Client, draft *issueDraft, pf *c
 		}
 	case "Epic":
 		var e *jiralib.Issue
-		e, err = pickEpic(client, cfg.Project, pf.epics)
+		e, err = pickEpic(client, cfg.Project)
 		if tui.IsEsc(err) {
 			return nil
 		}

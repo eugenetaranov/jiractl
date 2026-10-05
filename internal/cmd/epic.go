@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	jiralib "github.com/andygrunwald/go-jira"
 	"github.com/eugenetaranov/jiractl/internal/config"
@@ -13,11 +14,7 @@ import (
 	"github.com/eugenetaranov/jiractl/internal/tui"
 )
 
-const (
-	skipEpicRow    = "Skip: create without epic"
-	searchAgainRow = "Search again…"
-	searchAllRow   = "Search all epics…"
-)
+const skipEpicRow = "Skip: create without epic"
 
 func epicPickLabel(epic jiralib.Issue) string {
 	label := epicLabel(epic)
@@ -34,67 +31,57 @@ func epicSummary(epic *jiralib.Issue) string {
 	return epic.Fields.Summary
 }
 
-// searchEpic asks for search words, then shows the matching epics from Jira.
-// It returns the chosen epic, or nil when the user skips.
-func searchEpic(client *jira.Client, project string) (*jiralib.Issue, error) {
-	text := ""
-	for {
-		q, err := promptTextWithDefault("Search epics (words or key, Enter for open epics)", text, false)
-		if err != nil {
-			return nil, err
-		}
-		text = q
-
-		epics, err := client.SearchEpics(project, q)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Epic search failed: %v\n", err)
-		}
-		items := []string{skipEpicRow, searchAgainRow}
-		for _, e := range epics {
-			items = append(items, epicPickLabel(e))
-		}
-		header := fmt.Sprintf("%d epics match %q", len(epics), q)
-		if q == "" {
-			header = fmt.Sprintf("%d open epics", len(epics))
-		}
-
-		idx, err := fzfSelect(items, header)
-		switch {
-		case tui.IsEsc(err), err == nil && idx == 0:
-			return nil, nil
-		case err != nil:
-			return nil, err
-		case idx == 1:
-			continue
-		}
-		return &epics[idx-2], nil
+// chooseEpic opens the epic search, which asks Jira as the user types.
+// fixed rows are listed first; it returns the chosen fixed row (or -1) and
+// the chosen epic (or nil).
+func chooseEpic(client *jira.Client, project, header string, fixed []string) (int, *jiralib.Issue, error) {
+	var mu sync.Mutex
+	byQuery := map[string][]jiralib.Issue{}
+	res, err := tui.SearchSelect(tui.SearchOptions{
+		Header: header,
+		Fixed:  fixed,
+		Search: func(q string) ([]string, error) {
+			epics, err := client.SearchEpics(project, q)
+			if err != nil {
+				return nil, err
+			}
+			mu.Lock()
+			byQuery[q] = epics
+			mu.Unlock()
+			labels := make([]string, len(epics))
+			for i, e := range epics {
+				labels[i] = epicPickLabel(e)
+			}
+			return labels, nil
+		},
+	})
+	if err != nil {
+		return -1, nil, err
 	}
+	if res.Fixed >= 0 {
+		return res.Fixed, nil, nil
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	epic := byQuery[res.Query][res.Index]
+	return -1, &epic, nil
 }
 
-// pickEpic is the regular epic choice when no default is configured: recent
-// open epics, plus a row that searches all epics in Jira.
-func pickEpic(client *jira.Client, project string, recent *pending[[]jiralib.Issue]) (*jiralib.Issue, error) {
-	epics, err := recent.wait("epics")
-	if err != nil {
-		// Non-fatal: just skip epic selection
-		fmt.Fprintf(os.Stderr, "Warning: could not fetch epics: %v\n", err)
+// searchEpic lets the user find another epic or skip it (nil). Esc skips.
+func searchEpic(client *jira.Client, project string) (*jiralib.Issue, error) {
+	_, epic, err := chooseEpic(client, project, "Search epics (type words or a key)", []string{skipEpicRow})
+	if tui.IsEsc(err) {
 		return nil, nil
 	}
-	items := []string{"(None)", searchAllRow}
-	for _, e := range epics {
-		items = append(items, epicPickLabel(e))
-	}
-	idx, err := fzfSelect(items, "Select epic (optional)")
-	if err != nil {
-		return nil, err
-	}
-	switch idx {
-	case 0:
-		return nil, nil
-	case 1:
-		return searchEpic(client, project)
-	}
-	return &epics[idx-2], nil
+	return epic, err
+}
+
+// pickEpic is the regular epic choice: open epics, narrowed by searching
+// Jira as the user types. "(None)" returns nil; Esc is returned to the
+// caller, which decides whether it means "no epic" or "keep it".
+func pickEpic(client *jira.Client, project string) (*jiralib.Issue, error) {
+	_, epic, err := chooseEpic(client, project, "Select epic (optional)", []string{"(None)"})
+	return epic, err
 }
 
 // recoverEpic runs when the chosen epic can't be used. Interactively it lets

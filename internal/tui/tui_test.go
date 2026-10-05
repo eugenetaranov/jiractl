@@ -252,3 +252,48 @@ func TestReview(t *testing.T) {
 		t.Fatal("table should stay after confirming")
 	}
 }
+
+func TestSearchDropsStaleResults(t *testing.T) {
+	m := newSearchModel(SearchOptions{Fixed: []string{"Skip"}, Search: func(q string) ([]string, error) { return nil, nil }})
+	m.seq = 2
+	m.Update(searchResultMsg{seq: 1, query: "dev", items: []string{"OPS-1 dev"}})
+	if len(m.results) != 0 {
+		t.Fatal("stale results applied")
+	}
+	m.Update(searchResultMsg{seq: 2, query: "devops", items: []string{"OPS-40 DevOps k8s"}})
+	if len(m.results) != 1 || m.cursor != 1 {
+		t.Fatalf("results=%v cursor=%d", m.results, m.cursor)
+	}
+	m.Update(press("enter"))
+	if m.result.Index != 0 || m.result.Query != "devops" || m.result.Fixed != -1 {
+		t.Fatalf("result %+v", m.result)
+	}
+}
+
+func TestSearchDebouncesTyping(t *testing.T) {
+	m := newSearchModel(SearchOptions{Search: func(q string) ([]string, error) { return nil, nil }})
+	m.Update(press("a"))
+	m.Update(press("b"))
+	if m.seq != 2 {
+		t.Fatalf("seq=%d", m.seq)
+	}
+	// The first keystroke's timer fires late: no search for it.
+	if _, cmd := m.Update(debounceMsg{seq: 1}); cmd != nil || m.loading {
+		t.Fatal("stale debounce started a search")
+	}
+	if _, cmd := m.Update(debounceMsg{seq: 2}); cmd == nil || !m.loading {
+		t.Fatal("current debounce did not search")
+	}
+}
+
+func TestSearchFixedRowFirst(t *testing.T) {
+	m := newSearchModel(SearchOptions{Fixed: []string{"Skip"}, Search: func(q string) ([]string, error) { return nil, nil }})
+	m.Update(searchResultMsg{seq: 0, query: "", items: []string{"OPS-1"}})
+	if m.cursor != 0 {
+		t.Fatalf("cursor %d, want the fixed row", m.cursor)
+	}
+	m.Update(press("enter"))
+	if m.result.Fixed != 0 {
+		t.Fatalf("result %+v", m.result)
+	}
+}

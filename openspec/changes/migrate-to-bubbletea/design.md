@@ -73,7 +73,7 @@ Huh v2 runs a field's `Validate` synchronously on Enter and again on blur. A net
 ### Spike results (task 1.1)
 Run under the expect harness: the first frame appears in ~40 ms and Esc exits in ~50 ms. Terminal-capability queries don't block. Two findings:
 - expect's pty reports a 0×0 window, and Bubble Tea then renders nothing. The harness sets `stty_init "rows 40 cols 120"`, and `internal/tui` sets the pty to 80×24 (TIOCSWINSZ) when it reports 0×0, because Bubble Tea ignores `WithWindowSize` when output is a terminal.
-- The v2 renderer redraws only changed cells, so in-place updates arrive as fragments. e2e patterns must wait for newly drawn text (prompts, headers, list rows), not for a line edited in place.
+- The v2 renderer redraws only changed cells, so in-place updates arrive as fragments ("Open in browser" arrives as "pen in browser" when an "O" is already there). Waiting for "newly drawn" text wasn't reliable in the app shell, so `internal/tui` has a test hook: with `JIRACTL_E2E_REDRAW=1` every update is followed by `tea.ClearScreen`, so frames reach the pty whole. Only the e2e harness sets it.
 
 ## Risks / Trade-offs
 

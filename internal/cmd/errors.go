@@ -2,13 +2,10 @@ package cmd
 
 import (
 	"errors"
-	"fmt"
 	"net"
 	"net/url"
-	"os"
 
 	"github.com/eugenetaranov/jiractl/internal/jira"
-	"github.com/eugenetaranov/jiractl/internal/tui"
 )
 
 // errorHint suggests what to do about err, or "" when there's nothing useful
@@ -31,17 +28,4 @@ func errorHint(err error) string {
 		return "Run 'jiractl doctor' to check your setup."
 	}
 	return ""
-}
-
-// printError shows an error and, when there is one, a hint on what to do.
-func printError(title string, err error) {
-	fmt.Fprintf(os.Stderr, "\n✗ %s\n  %v\n", title, err)
-	if hint := errorHint(err); hint != "" {
-		fmt.Fprintf(os.Stderr, "  → %s\n", hint)
-	}
-}
-
-// waitForEnter pauses so a message isn't hidden by the next picker.
-func waitForEnter() {
-	_ = tui.Pause("Press Enter to return to the menu")
 }

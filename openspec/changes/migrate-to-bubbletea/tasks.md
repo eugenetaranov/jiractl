@@ -19,12 +19,12 @@
 
 ## 3. Phase 3: App shell (release v0.5.0)
 
-- [ ] 3.1 `tui.App` screen stack; menu screen with a status bar (default epic, last result, last error with hint)
-- [ ] 3.2 Query browser screen: list + preview split (stacked under 100 columns), async refresh of a changed row
-- [ ] 3.3 Actions overlay: open, copy, transition, assign, comment
-- [ ] 3.4 Live epic search component: debounced commands, sequence numbers to drop stale responses, Skip row; used by create, change default epic and configure
-- [ ] 3.5 Hand off to create/configure programs and resume with their result
-- [ ] 3.6 Remove `menuStatus`, `waitForEnter`, and the header text from `checkLogin`
+- [x] 3.1 `tui.App` screen stack; menu screen with a status bar (default epic, last result, last error with hint)
+- [x] 3.2 Query browser screen: list + preview split (stacked under 100 columns), async refresh of a changed row
+- [x] 3.3 Actions overlay: open, copy, transition, assign, comment
+- [x] 3.4 Live epic search component: debounced commands, sequence numbers to drop stale responses, Skip row; used by create, change default epic and configure
+- [x] 3.5 Hand off to create/configure programs and resume with their result
+- [x] 3.6 Remove `menuStatus`, `waitForEnter`, and the header text from `checkLogin`
 
 ## 4. Phase 4: Cleanup (v0.5.x)
 

@@ -41,7 +41,13 @@ func run(m tea.Model) (tea.Model, error) {
 		return nil, errNoTerminal
 	}
 	ensureWindowSize()
+	if fullRedraw {
+		m = redrawModel{m}
+	}
 	final, err := tea.NewProgram(m, tea.WithOutput(os.Stderr), tea.WithInput(os.Stdin)).Run()
+	if r, ok := final.(redrawModel); ok {
+		final = r.Model
+	}
 	if errors.Is(err, tea.ErrInterrupted) {
 		return final, ErrInterrupted
 	}

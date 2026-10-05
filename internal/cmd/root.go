@@ -58,10 +58,6 @@ func versionString() string {
 // can't be offered (no terminal) or was declined.
 var ErrNotConfigured = errors.New("not configured: run 'jiractl configure'")
 
-// menuStatus is a one-line result of the last menu action (e.g. the created
-// key), shown in the menu header because the picker hides earlier output.
-var menuStatus string
-
 // loadConfig returns the config, offering to run setup when it is missing.
 func loadConfig() (*config.Config, error) {
 	cfg, err := config.Load()
@@ -102,70 +98,14 @@ var menuItems = []string{
 	"Exit",
 }
 
-// runInteractiveMenu shows the main menu until Exit or Esc. Errors and
-// cancels inside an action are reported and the menu comes back.
+// runInteractiveMenu runs the app shell: the main menu, with results and
+// errors in its status bar and the default epic in its header. Esc or Exit
+// leaves.
 func runInteractiveMenu(cmd *cobra.Command, args []string) error {
 	if _, err := loadConfig(); err != nil {
 		return err
 	}
-
-	authWarning := checkLogin()
-	for {
-		header := "Select action"
-		// Reload each time: configure or the epic entry may have changed it.
-		if cfg, err := config.Load(); err == nil {
-			client, _ := jira.NewClient(cfg)
-			header = defaultEpicLine(cfg, client) + "  │  " + header
-		}
-		if authWarning != "" {
-			header = "⚠ " + authWarning + "  │  " + header
-		}
-		if menuStatus != "" {
-			header += "   (" + menuStatus + ")"
-		}
-		idx, err := fzfSelect(menuItems, header)
-		if tui.IsEsc(err) {
-			return nil
-		}
-		if err != nil && errors.Is(err, ErrCancelled) {
-			return err
-		}
-		if err != nil {
-			return fmt.Errorf("prompt failed: %w", err)
-		}
-
-		menuStatus = ""
-		action := menuItems[idx]
-		var actionErr error
-		switch menuItems[idx] {
-		case "Create new issue":
-			actionErr = createCmd.RunE(createCmd, nil)
-		case "Run query":
-			actionErr = runQueryInteractive()
-		case "Change default epic":
-			actionErr = changeDefaultEpic()
-		case "Configure":
-			actionErr = configureCmd.RunE(configureCmd, nil)
-			if actionErr == nil {
-				authWarning = checkLogin()
-			}
-		case "Exit":
-			return nil
-		}
-
-		switch {
-		case actionErr == nil:
-		case errors.Is(actionErr, tui.ErrInterrupted):
-			return actionErr
-		case errors.Is(actionErr, ErrCancelled):
-			fmt.Fprintln(os.Stderr, "Cancelled.")
-			menuStatus = "Cancelled."
-		default:
-			printError(action+" failed", actionErr)
-			waitForEnter()
-			menuStatus = action + " failed"
-		}
-	}
+	return tui.RunApp(newMenuScreen(), headerCmd())
 }
 
 // checkLogin tests the stored credentials so the menu can say up front that

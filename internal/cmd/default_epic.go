@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"sync"
 	"time"
 
@@ -77,99 +76,54 @@ func defaultEpicLine(cfg *config.Config, client *jira.Client) string {
 const noDefaultEpicRow = "None: no default epic"
 
 // changeDefaultEpic is the "Change default epic" menu entry. It saves only
-// issue_defaults.epic_link; Esc leaves the config unchanged.
-func changeDefaultEpic() error {
+// issue_defaults.epic_link and returns what changed; Esc keeps the default.
+func changeDefaultEpic() (string, error) {
 	cfg, err := loadConfig()
 	if err != nil {
-		return err
+		return "", err
 	}
 	client, err := jira.NewClient(cfg)
 	if err != nil {
-		return err
-	}
-
-	epics, err := client.GetEpics(cfg.Project)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not fetch epics: %v\n", err)
+		return "", err
 	}
 
 	current := cfg.IssueDefaults.EpicLink
-	type row struct {
-		label string
-		epic  *jiralib.Issue
-		none  bool
-	}
-	var rows []row
-	// The current default goes first so Enter keeps it.
+	var fixed []string
 	if current != "" {
 		label := current + " (current)"
-		var cur *jiralib.Issue
-		for i := range epics {
-			if epics[i].Key == current {
-				cur = &epics[i]
-				label = epicPickLabel(epics[i]) + " (current)"
-			}
+		if res, _, ok := lookupEpic(client, current).waitFor(headerLookupTimeout); ok && res.issue != nil {
+			label = epicPickLabel(*res.issue) + " (current)"
 		}
-		if cur == nil {
-			if res, _, ok := lookupEpic(client, current).waitFor(headerLookupTimeout); ok && res.issue != nil {
-				cur = res.issue
-				label = epicPickLabel(*cur) + " (current)"
-			}
-		}
-		rows = append(rows, row{label: label, epic: cur})
+		fixed = append(fixed, label)
 	}
-	rows = append(rows, row{label: noDefaultEpicRow, none: true}, row{label: searchAllRow})
-	for i := range epics {
-		if epics[i].Key != current {
-			rows = append(rows, row{label: epicPickLabel(epics[i]), epic: &epics[i]})
-		}
-	}
+	fixed = append(fixed, noDefaultEpicRow)
 
-	labels := make([]string, len(rows))
-	for i, r := range rows {
-		labels[i] = r.label
-	}
-	idx, err := fzfSelect(labels, "Change default epic (Esc keeps "+orNone(current)+")")
-	if tui.IsEsc(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-
-	chosen := rows[idx]
-	var newKey string
+	row, epic, err := chooseEpic(client, cfg.Project, "Change default epic (Esc keeps "+orNone(current)+")", fixed)
 	switch {
-	case chosen.none:
-		newKey = ""
-	case chosen.label == searchAllRow:
-		epic, err := searchEpic(client, cfg.Project)
-		if err != nil || epic == nil {
-			return err // Skip in the search keeps the current default
-		}
-		chosen.epic = epic
-		newKey = epic.Key
-	case chosen.epic != nil:
-		newKey = chosen.epic.Key
-	default:
-		newKey = current
+	case tui.IsEsc(err):
+		return "Default epic unchanged", nil
+	case err != nil:
+		return "", err
 	}
 
-	if newKey == current {
-		menuStatus = "Default epic unchanged"
-		return nil
+	newKey := current
+	switch {
+	case epic != nil:
+		newKey = epic.Key
+	case fixed[row] == noDefaultEpicRow:
+		newKey = ""
 	}
+	if newKey == current {
+		return "Default epic unchanged", nil
+	}
+
 	cfg.IssueDefaults.EpicLink = newKey
 	if err := cfg.Save(); err != nil {
-		return fmt.Errorf("failed to save default epic: %w", err)
+		return "", fmt.Errorf("failed to save default epic: %w", err)
 	}
-
 	if newKey == "" {
-		menuStatus = "Default epic cleared"
-	} else {
-		rememberEpic(chosen.epic)
-		menuStatus = fmt.Sprintf("Default epic set to %s %s", newKey, textutil.Truncate(epicSummary(chosen.epic), 40))
+		return "Default epic cleared", nil
 	}
-	fmt.Fprintln(os.Stderr, menuStatus)
-	return nil
+	rememberEpic(epic)
+	return fmt.Sprintf("Default epic set to %s %s", newKey, textutil.Truncate(epicSummary(epic), 40)), nil
 }

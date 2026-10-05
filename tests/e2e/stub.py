@@ -117,6 +117,9 @@ class H(http.server.BaseHTTPRequestHandler):
             log({"jql": jql})
             low = jql.lower()
             if "issuetype = epic" in low:
+                for key in EPICS:
+                    if 'key = "%s"' % key.lower() in low:
+                        return self.send(200, {"issues": [EPICS[key]]})
                 if "devops" in low or "k8s" in low:
                     return self.send(200, {"issues": [EPICS["OPS-40"]]})
                 return self.send(200, {"issues": list(EPICS.values())})

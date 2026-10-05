@@ -49,7 +49,7 @@ run_expect() {
 set timeout 10
 set stty_init "rows 40 cols 120"
 log_file -noappend $WORK/out.log
-spawn env EDITOR=$WORK/editor.sh HOME=$home XDG_STATE_HOME=$home/state JIRACTL_TEST_USERNAME=u JIRACTL_TEST_TOKEN=t $BIN $args
+spawn env JIRACTL_E2E_REDRAW=1 EDITOR=$WORK/editor.sh HOME=$home XDG_STATE_HOME=$home/state JIRACTL_TEST_USERNAME=u JIRACTL_TEST_TOKEN=t $BIN $args
 $body
 expect {
   eof {}
@@ -71,10 +71,8 @@ H=$(new_home '' '[issue_defaults]' 'issue_type = "Task"' 'epic_link = "OPS-12"' 
 run_expect "$H" '
 expect "Summary" { send "Fix login\r" }
 expect "Ctrl+D to finish" { send "\004" }
-expect "Search epics" { send "devops k8s\r" }
-expect "1 epics match" { sleep 0.5; send "OPS-40" }
-sleep 0.5
-send "\r"
+expect "Search epics" { sleep 0.5; send "devops k8s" }
+expect -ex "results for \"devops k8s\"" { sleep 0.3; send "\r" }
 expect "default epic?" { send "y" }
 expect "Create?" { send "\r" }'
 if grep -q '"parent": {"key": "OPS-40"}' "$STUB_LOG" && grep -q 'epic_link = "OPS-40"' "$H/.jiractl.toml" && grep -q '# keep me' "$H/.jiractl.toml"; then
@@ -88,10 +86,8 @@ H=$(new_home '' '[issue_defaults]' 'issue_type = "Task"' 'epic_link = "OPS-12"')
 run_expect "$H" '
 expect "Summary" { send "No epic\r" }
 expect "Ctrl+D to finish" { send "\004" }
-expect "Search epics" { send "\r" }
-expect "open epics" { sleep 0.5; send "Skip" }
-sleep 0.5
-send "\r"
+expect "Search epics" {}
+expect "results" { sleep 0.3; send "\r" }
 expect "Create?" { send "\r" }'
 if grep -q '"method": "POST"' "$STUB_LOG" && ! grep -q parent "$STUB_LOG" && grep -q 'epic_link = "OPS-12"' "$H/.jiractl.toml"; then
   pass "missing epic: skip"
@@ -193,9 +189,8 @@ chmod +x "$WORK/editor.sh"
 run_expect "$H" '
 expect "Summary" { send "Typo summry\r" }
 expect "Ctrl+D to finish" { send "First\r\rSecond"; sleep 0.3; send "\004" }
-expect "Select epic" { sleep 0.5; send "(None)" }
-sleep 0.5
-send "\r"
+expect "Select epic" {}
+expect "results" { sleep 0.3; send "\r" }
 expect "Work Allocation:" {}
 expect "Create?" { send "e" }
 expect "Edit which field" { sleep 0.5; send "Summary" }
@@ -270,8 +265,9 @@ expect "Open in browser" { sleep 0.5; send "Transition" }
 sleep 0.5
 send "\r"
 expect "In Progress" { sleep 0.5; send "\r" }
-expect "Back" { sleep 0.5; send "\033" }
-expect "mine (3 found)" { sleep 0.5; send "\033" }' "query mine"
+expect "OPS-1: Start" { sleep 0.5; send "\033" }
+sleep 0.5
+send "\033"' "query mine"
 if [ "$EXIT" = 0 ] && grep '"path": "/rest/api/2/issue/OPS-1/transitions"' "$STUB_LOG" | grep -q '"transition": {"id": "21"}'; then
   pass "query: browse and transition"
 else
@@ -285,8 +281,7 @@ expect "Default epic: OPS-12 (not found)" { sleep 0.5; send "Change" }
 sleep 0.5
 send "\r"
 expect "Change default epic (Esc keeps OPS-12)" { sleep 0.5; send "OPS-41" }
-sleep 0.5
-send "\r"
+expect -ex "results for \"OPS-41\"" { sleep 0.3; send "\r" }
 expect "Default epic: OPS-41 Billing revamp" { sleep 0.5; send "\033" }' ""
 if [ "$EXIT" = 0 ] && grep -q 'epic_link = "OPS-41"' "$H/.jiractl.toml" && grep -q '# team epic' "$H/.jiractl.toml"; then
   pass "menu: change default epic"
@@ -297,8 +292,9 @@ run_expect "$H" '
 expect "Select action" { sleep 0.5; send "Change" }
 sleep 0.5
 send "\r"
-expect "OPS-41" { sleep 0.5; send "None" }
-sleep 0.5
+expect "None: no default epic" {}
+expect "results" { sleep 0.3; send "\033\[B" }
+sleep 0.3
 send "\r"
 expect "Default epic: none" { sleep 0.5; send "\033" }' ""
 if [ "$EXIT" = 0 ] && ! grep -q 'epic_link' "$H/.jiractl.toml"; then
@@ -342,8 +338,7 @@ expect "default issue type" { sleep 0.5; send "Task" }
 sleep 0.5
 send "\r"
 expect "default epic" { sleep 0.5; send "OPS-40" }
-sleep 0.5
-send "\r"
+expect -ex "results for \"OPS-40\"" { sleep 0.3; send "\r" }
 expect "Checking setup" {}' configure
 : > "$STUB_LOG"
 set +e
@@ -365,13 +360,14 @@ cat > "$WORK/s.exp" <<EXP
 set timeout 10
 set stty_init "rows 40 cols 120"
 log_file -noappend $WORK/out.log
-spawn env HOME=$H JIRACTL_TEST_USERNAME=u JIRACTL_TEST_TOKEN=bad $BIN
+spawn env JIRACTL_E2E_REDRAW=1 HOME=$H JIRACTL_TEST_USERNAME=u JIRACTL_TEST_TOKEN=bad $BIN
 expect "Jira rejected your API token" { sleep 0.5; send "Run" }
 sleep 0.5
 send "\r"
 expect "Select query" { sleep 0.5; send "\r" }
-expect "Press Enter to return to the menu" { send "\r" }
-expect "Run query failed" { sleep 0.5; send "\033" }
+expect "Create a new API token" { sleep 0.5; send "\033" }
+sleep 0.5
+send "\033"
 expect eof
 EXP
 set +e

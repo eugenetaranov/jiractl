@@ -44,6 +44,12 @@ func Select(items []string, opts SelectOptions) (int, error) {
 }
 
 type selectModel struct {
+	// embedded lists live inside the app: choosing or Esc sends a
+	// SelectDoneMsg instead of ending the program, and the list stays usable.
+	embedded bool
+	id       string
+	// fill uses the whole height given to View instead of a bounded height.
+	fill     bool
 	items    []string
 	opts     SelectOptions
 	filter   textinput.Model
@@ -121,7 +127,36 @@ func (m *selectModel) refilter() {
 	m.cursor, m.offset = 0, 0
 }
 
+// SelectDoneMsg reports a choice (or Esc as ErrCancelled) from an embedded
+// list.
+type SelectDoneMsg struct {
+	ID    string
+	Index int
+	Err   error
+}
+
+// end finishes the list: a standalone list quits its program, an embedded
+// one reports to its screen and stays ready for the next choice.
+func (m *selectModel) end(err error) tea.Cmd {
+	if !m.embedded {
+		m.err, m.finished = err, true
+		return tea.Quit
+	}
+	msg := SelectDoneMsg{ID: m.id, Index: m.chosen, Err: err}
+	return func() tea.Msg { return msg }
+}
+
 func (m *selectModel) rows() int {
+	if m.fill {
+		overhead := 2 // filter + counter
+		if m.opts.Header != "" {
+			overhead++
+		}
+		if m.opts.Preview != nil && m.width < 100 {
+			return max((m.height-overhead)/2, 1)
+		}
+		return max(min(m.height-overhead, len(m.items)), 1)
+	}
 	rows := min(m.opts.MaxRows, len(m.items))
 	if limit := m.height/2 - 3; limit > 3 && rows > limit {
 		rows = limit
@@ -136,11 +171,9 @@ func (m *selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case !current:
 			return m, nil
 		case res.err == nil:
-			m.finished = true
-			return m, tea.Quit
+			return m, m.end(nil)
 		case giveUp:
-			m.err, m.finished = res.err, true
-			return m, tea.Quit
+			return m, m.end(res.err)
 		}
 		m.problem = res.err.Error()
 		m.chosen = -1
@@ -148,12 +181,10 @@ func (m *selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if m.check.running {
 		if keyIs(msg, "ctrl+c") {
-			m.err, m.finished = ErrInterrupted, true
-			return m, tea.Quit
+			return m, m.end(ErrInterrupted)
 		}
 		if keyIs(msg, "esc") {
-			m.err, m.finished = ErrCancelled, true
-			return m, tea.Quit
+			return m, m.end(ErrCancelled)
 		}
 		return m, m.check.update(msg)
 	}
@@ -165,11 +196,9 @@ func (m *selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "ctrl+c":
-			m.err, m.finished = ErrInterrupted, true
-			return m, tea.Quit
+			return m, m.end(ErrInterrupted)
 		case "esc":
-			m.err, m.finished = ErrCancelled, true
-			return m, tea.Quit
+			return m, m.end(ErrCancelled)
 		case "enter":
 			if len(m.matches) == 0 {
 				return m, nil
@@ -180,8 +209,7 @@ func (m *selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				chosen := m.chosen
 				return m, m.check.start(func() error { return m.opts.Check(chosen) })
 			}
-			m.finished = true
-			return m, tea.Quit
+			return m, m.end(nil)
 		case "up", "ctrl+p", "ctrl+k":
 			if m.cursor > 0 {
 				m.cursor--
@@ -242,14 +270,18 @@ func (m *selectModel) listView(width int) string {
 }
 
 func (m *selectModel) View() tea.View {
+	return tea.NewView(m.render())
+}
+
+func (m *selectModel) render() string {
 	if m.finished {
 		switch {
 		case m.err == nil && m.chosen >= 0 && m.opts.Header != "":
-			return tea.NewView(doneLine(m.opts.Header+":", m.items[m.chosen]) + "\n")
+			return doneLine(m.opts.Header+":", m.items[m.chosen]) + "\n"
 		case m.err != nil && !errorsIsCancel(m.err):
-			return tea.NewView(failLine(m.opts.Header+":", m.err.Error()) + "\n")
+			return failLine(m.opts.Header+":", m.err.Error()) + "\n"
 		}
-		return tea.NewView("")
+		return ""
 	}
 
 	var b strings.Builder
@@ -260,7 +292,7 @@ func (m *selectModel) View() tea.View {
 
 	if m.opts.Preview == nil || len(m.matches) == 0 {
 		b.WriteString(m.listView(m.width))
-		return tea.NewView(b.String())
+		return b.String()
 	}
 
 	current := m.matches[m.cursor]
@@ -276,18 +308,21 @@ func (m *selectModel) View() tea.View {
 			MaxHeight(paneHeight).
 			Render(m.opts.Preview(current, m.width-listWidth-3, paneHeight))
 		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, list, pane))
-		return tea.NewView(b.String())
+		return b.String()
 	}
 
 	b.WriteString(m.listView(m.width) + "\n")
 	paneHeight := 8
+	if m.fill {
+		paneHeight = max(m.height-m.rows()-5, 3)
+	}
 	pane := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), true, false, false, false).
 		Width(m.width).
 		MaxHeight(paneHeight + 1).
 		Render(m.opts.Preview(current, m.width, paneHeight))
 	b.WriteString(pane)
-	return tea.NewView(b.String())
+	return b.String()
 }
 
 // truncate cuts s to width display columns.
@@ -300,4 +335,50 @@ func truncate(s string, width int) string {
 		runes = runes[:len(runes)-1]
 	}
 	return string(runes) + "…"
+}
+
+// List is a Select that lives inside the app (see App): it reports choices
+// with SelectDoneMsg and fills the space it is given.
+type List struct {
+	m *selectModel
+}
+
+// NewList creates an embedded list; id identifies it in SelectDoneMsg.
+func NewList(id string, items []string, opts SelectOptions) *List {
+	m := newSelectModel(items, opts)
+	m.embedded, m.fill, m.id = true, true, id
+	return &List{m: m}
+}
+
+// Init starts the cursor blink.
+func (l *List) Init() tea.Cmd { return l.m.Init() }
+
+// Update handles a message.
+func (l *List) Update(msg tea.Msg) tea.Cmd {
+	_, cmd := l.m.Update(msg)
+	return cmd
+}
+
+// View renders the list into width x height.
+func (l *List) View(width, height int) string {
+	l.m.width, l.m.height = width, height
+	l.m.filter.SetWidth(max(width-4, 20))
+	return l.m.render()
+}
+
+// SetItems replaces the items, keeping the filter and, when possible, the
+// cursor position.
+func (l *List) SetItems(items []string) {
+	cursor := l.m.cursor
+	l.m.items = items
+	l.m.matches = matchItems(items, l.m.filter.Value())
+	l.m.cursor = min(cursor, max(len(l.m.matches)-1, 0))
+}
+
+// Current returns the item index under the cursor, or -1.
+func (l *List) Current() int {
+	if len(l.m.matches) == 0 {
+		return -1
+	}
+	return l.m.matches[l.m.cursor]
 }
