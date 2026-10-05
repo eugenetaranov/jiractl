@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/eugenetaranov/jiractl/internal/config"
 	"github.com/eugenetaranov/jiractl/internal/jira"
@@ -107,12 +108,16 @@ func runInteractiveMenu(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	authWarning := checkLogin()
 	for {
 		header := "Select action"
 		// Reload each time: configure or the epic entry may have changed it.
 		if cfg, err := config.Load(); err == nil {
 			client, _ := jira.NewClient(cfg)
 			header = defaultEpicLine(cfg, client) + "  │  " + header
+		}
+		if authWarning != "" {
+			header = "⚠ " + authWarning + "  │  " + header
 		}
 		if menuStatus != "" {
 			header += "   (" + menuStatus + ")"
@@ -126,6 +131,7 @@ func runInteractiveMenu(cmd *cobra.Command, args []string) error {
 		}
 
 		menuStatus = ""
+		action := menuItems[idx]
 		var actionErr error
 		switch menuItems[idx] {
 		case "Create new issue":
@@ -136,6 +142,9 @@ func runInteractiveMenu(cmd *cobra.Command, args []string) error {
 			actionErr = changeDefaultEpic()
 		case "Configure":
 			actionErr = configureCmd.RunE(configureCmd, nil)
+			if actionErr == nil {
+				authWarning = checkLogin()
+			}
 		case "Exit":
 			return nil
 		}
@@ -146,10 +155,33 @@ func runInteractiveMenu(cmd *cobra.Command, args []string) error {
 			fmt.Fprintln(os.Stderr, "Cancelled.")
 			menuStatus = "Cancelled."
 		default:
-			fmt.Fprintln(os.Stderr, "Error:", actionErr)
-			menuStatus = "Error: " + actionErr.Error()
+			printError(action+" failed", actionErr)
+			waitForEnter()
+			menuStatus = action + " failed"
 		}
 	}
+}
+
+// checkLogin tests the stored credentials so the menu can say up front that
+// Jira rejects them. It returns "" when login works or can't be checked.
+func checkLogin() string {
+	cfg, err := config.Load()
+	if err != nil {
+		return ""
+	}
+	client, err := jira.NewClient(cfg)
+	if err != nil {
+		return "No credentials stored: choose Configure"
+	}
+	p := fetch(func() (struct{}, error) { return struct{}{}, client.TestConnection() })
+	_, err, done := p.waitFor(3 * time.Second)
+	if !done || err == nil {
+		return ""
+	}
+	if s := jira.StatusOf(err); s == 401 || s == 403 {
+		return "Jira rejected your API token (expired?): choose Configure"
+	}
+	return "Can't reach Jira: run 'jiractl doctor'"
 }
 
 func Execute() {
@@ -164,6 +196,9 @@ func Execute() {
 		os.Exit(1)
 	default:
 		fmt.Fprintln(os.Stderr, "Error:", err)
+		if hint := errorHint(err); hint != "" {
+			fmt.Fprintln(os.Stderr, "  →", hint)
+		}
 		os.Exit(1)
 	}
 }

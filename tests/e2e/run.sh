@@ -359,4 +359,49 @@ else
   fail "data center: setup, create, query" "exit=$EXIT2 key=$KEY keys=$KEYS $(cat "$WORK/err") $(cat "$H/.jiractl.toml")"
 fi
 
+# --- rejected token: menu warns up front; a failing action explains itself and waits
+H=$(new_home '[[queries]]' 'name = "mine"' 'jql = "assignee = currentUser()"')
+cat > "$WORK/s.exp" <<EXP
+set timeout 10
+log_file -noappend $WORK/out.log
+spawn env HOME=$H JIRACTL_TEST_USERNAME=u JIRACTL_TEST_TOKEN=bad $BIN
+expect "Jira rejected your API token" { sleep 0.5; send "Run" }
+sleep 0.5
+send "\r"
+expect "Select query" { sleep 0.5; send "\r" }
+expect "Press Enter to return to the menu" { send "\r" }
+expect "Run query failed" { sleep 0.5; send "\033" }
+expect eof
+EXP
+set +e
+expect "$WORK/s.exp" >/dev/null 2>&1
+EXIT=$?
+set -e
+if [ "$EXIT" = 0 ] && out_has "rejected your credentials \(401\)" && out_has "Create a new API token"; then
+  pass "menu: rejected token explained"
+else
+  fail "menu: rejected token explained" "exit=$EXIT"
+fi
+
+# --- command line: error plus hint
+set +e
+ERR=$(HOME=$H JIRACTL_TEST_USERNAME=u JIRACTL_TEST_TOKEN=bad "$BIN" query mine -o keys 2>&1 >/dev/null)
+set -e
+if [[ "$ERR" == *"rejected your credentials (401)"* ]] && [[ "$ERR" == *"→ Create a new API token"* ]]; then
+  pass "cli: rejected token explained"
+else
+  fail "cli: rejected token explained" "$ERR"
+fi
+
+# --- expired token served as anonymous: still reported as rejected, not "no issues"
+set +e
+ERR=$(HOME=$H JIRACTL_TEST_USERNAME=u JIRACTL_TEST_TOKEN=expired "$BIN" query mine -o keys 2>&1 >/dev/null)
+EXIT=$?
+set -e
+if [ "$EXIT" = 1 ] && [[ "$ERR" == *"rejected your credentials (401)"* ]]; then
+  pass "cli: silently rejected token detected"
+else
+  fail "cli: silently rejected token detected" "exit=$EXIT $ERR"
+fi
+
 exit $FAILED

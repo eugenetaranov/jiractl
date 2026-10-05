@@ -59,6 +59,16 @@ class H(http.server.BaseHTTPRequestHandler):
             return self.send(200, {"version": "1001.0.0", "deploymentType": "Cloud", "baseUrl": "http://stub"})
         if self.token() == "bad":
             return self.send(401)
+        if self.token() == "expired" and u.path == "/rest/api/3/search/jql":
+            # Like Jira Cloud: a failed login on search is served as anonymous.
+            body = json.dumps({"issues": []}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("X-Seraph-LoginReason", "AUTHENTICATED_FAILED")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if u.path == "/rest/api/2/myself":
             return self.send(200, {"accountId": "me", "displayName": "Me"})
         if u.path == "/rest/api/2/project":

@@ -303,6 +303,15 @@ Unknown keys in `~/.jiractl.toml` are reported as warnings on stderr, so a typo 
 
 Warnings, progress messages and prompts go to stderr, so stdout can be piped.
 
+Errors come with a hint on what to do, e.g. an expired API token:
+
+```
+Error: query "mine" failed: Jira rejected your credentials (401): the API token is wrong or has expired
+  → Create a new API token at https://id.atlassian.com/manage-profile/security/api-tokens, then run 'jiractl configure' (or pick Configure in the menu).
+```
+
+In the menu, a failed action shows the same message and waits for Enter instead of returning to the menu straight away, and the menu header warns when Jira rejects your stored token.
+
 ## Testing
 
 ```bash

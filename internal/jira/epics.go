@@ -1,6 +1,7 @@
 package jira
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -97,8 +98,8 @@ func IsResolved(issue jira.Issue) bool {
 // IsEpicRejection reports whether a create failed because of the parent or
 // epic field.
 func IsEpicRejection(err error) bool {
-	apiErr, ok := err.(*APIError)
-	if !ok {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
 		return false
 	}
 	if apiErr.HasField("parent") {

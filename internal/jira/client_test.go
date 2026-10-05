@@ -125,7 +125,7 @@ func TestUnauthorizedStatus(t *testing.T) {
 		w.WriteHeader(401)
 	})
 	err := c.TestConnection()
-	if StatusOf(err) != 401 || !strings.Contains(err.Error(), "authentication failed") {
+	if StatusOf(err) != 401 || !strings.Contains(err.Error(), "rejected your credentials") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -152,4 +152,15 @@ func newTestClientWith(t *testing.T, user, token string, h http.HandlerFunc) *Cl
 		t.Fatal(err)
 	}
 	return c
+}
+
+func TestSilentLoginFailureIsUnauthorized(t *testing.T) {
+	c := newTestClient(t, &config.Config{}, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Seraph-LoginReason", "AUTHENTICATED_FAILED")
+		_, _ = io.WriteString(w, `{"issues":[]}`)
+	})
+	_, err := c.SearchIssues("assignee = currentUser()", 10)
+	if StatusOf(err) != 401 || !strings.Contains(err.Error(), "rejected your credentials") {
+		t.Fatalf("err = %v", err)
+	}
 }

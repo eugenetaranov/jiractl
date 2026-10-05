@@ -2,6 +2,7 @@ package jira
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -42,9 +43,11 @@ func (e *APIError) HasField(name string) bool {
 	return ok
 }
 
-// StatusOf returns the HTTP status of an APIError, or 0 for other errors.
+// StatusOf returns the HTTP status of an APIError anywhere in err's chain,
+// or 0 for other errors.
 func StatusOf(err error) int {
-	if apiErr, ok := err.(*APIError); ok {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
 		return apiErr.Status
 	}
 	return 0
@@ -81,9 +84,9 @@ func newAPIError(resp *http.Response) *APIError {
 	if len(apiErr.Messages) == 0 && len(apiErr.Fields) == 0 {
 		switch resp.StatusCode {
 		case http.StatusUnauthorized:
-			apiErr.Messages = []string{"authentication failed (401): check username and API token"}
+			apiErr.Messages = []string{"Jira rejected your credentials (401): the API token is wrong or has expired"}
 		case http.StatusForbidden:
-			apiErr.Messages = []string{"permission denied (403)"}
+			apiErr.Messages = []string{"permission denied (403): your Jira account isn't allowed to do this"}
 		}
 	}
 	return apiErr

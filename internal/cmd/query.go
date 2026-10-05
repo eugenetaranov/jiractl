@@ -147,6 +147,7 @@ func executeQuery(cfg *config.Config, title, jql string, limit int, output strin
 
 	if len(issues) == 0 {
 		fmt.Fprintln(os.Stderr, "No issues found.")
+		menuStatus = fmt.Sprintf("No issues found for %q", title)
 		return nil
 	}
 	return browseIssues(client, cfg, issues, fmt.Sprintf("%s (%d found)", title, len(issues)))

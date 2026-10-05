@@ -78,8 +78,13 @@ func NewClientWith(cfg *config.Config, username, token string) (*Client, error) 
 		}
 		httpClient = tp.Client()
 	}
-	// Never hang forever on an unresponsive server.
-	httpClient = &http.Client{Transport: httpClient.Transport, Timeout: requestTimeout}
+	// Never hang forever on an unresponsive server, and never mistake a
+	// rejected login for an anonymous success.
+	transport := httpClient.Transport
+	if httpClient != http.DefaultClient {
+		transport = &loginCheckTransport{next: transport}
+	}
+	httpClient = &http.Client{Transport: transport, Timeout: requestTimeout}
 
 	client, err := jira.NewClient(httpClient, cfg.Server)
 	if err != nil {
