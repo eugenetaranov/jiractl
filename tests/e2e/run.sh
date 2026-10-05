@@ -240,8 +240,9 @@ fi
 set +e
 OUT=$(HOME=$H JIRACTL_TEST_USERNAME=u JIRACTL_TEST_TOKEN=t "$BIN" query mine 2>/dev/null | cat)
 set -e
-if [ "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')" = 2 ] && [[ "$OUT" == OPS-1* ]] && [[ "$OUT" != *"Running query"* ]]; then
-  pass "query: piped table"
+ORDER=$(printf '%s\n' "$OUT" | awk '{print $1}' | tr '\n' ' ')
+if [ "$ORDER" = "OPS-2 OPS-1 OPS-3 " ] && [[ "$OUT" != *"Running query"* ]]; then
+  pass "query: piped table, sorted by status then update"
 else
   fail "query: piped table" "$OUT"
 fi
@@ -263,6 +264,7 @@ fi
 # --- query: browse, preview, transition, back to list, Esc exits 0
 : > "$STUB_LOG"
 run_expect "$H" '
+expect "mine (3 found)" { sleep 0.5; send "OPS-1" }
 expect "Login fails on Safari" {}
 sleep 0.3
 send "\r"
@@ -271,7 +273,7 @@ sleep 0.5
 send "\r"
 expect "In Progress" { sleep 0.5; send "\r" }
 expect "Back" { sleep 0.5; send "\033" }
-expect "mine (2 found)" { sleep 0.5; send "\033" }' "query mine"
+expect "mine (3 found)" { sleep 0.5; send "\033" }' "query mine"
 if [ "$EXIT" = 0 ] && grep '"path": "/rest/api/2/issue/OPS-1/transitions"' "$STUB_LOG" | grep -q '"transition": {"id": "21"}'; then
   pass "query: browse and transition"
 else
@@ -353,7 +355,7 @@ KEYS=$(HOME=$H JIRACTL_TEST_TOKEN=pat "$BIN" query mine -o keys 2>/dev/null)
 set -e
 if grep -q 'deployment = "server"' "$H/.jiractl.toml" && [ "$EXIT2" = 0 ] && [ "$KEY" = OPS-99 ] &&
    grep '"path": "/rest/api/2/issue"' "$STUB_LOG" | grep -q '"customfield_10014": "OPS-40"' &&
-   [ "$(echo $KEYS)" = "OPS-1 OPS-2" ]; then
+   [ "$(echo $KEYS)" = "OPS-1 OPS-2 OPS-3" ]; then
   pass "data center: setup, create, query"
 else
   fail "data center: setup, create, query" "exit=$EXIT2 key=$KEY keys=$KEYS $(cat "$WORK/err") $(cat "$H/.jiractl.toml")"

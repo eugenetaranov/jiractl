@@ -133,6 +133,8 @@ jiractl inspect https://yourcompany.atlassian.net/browse/PROJ-123
 
 Run a saved JQL query. Without a name, shows a menu of available queries. Names match exactly, case-insensitively, or by unique prefix (`jiractl query rec` runs `recent`); an unknown name lists the available ones.
 
+Results are listed In Progress first, then To Do, then Done (any status in Jira's done category, such as "Completed" or "Closed"), with the most recently updated first in each group; each row shows how long ago it was updated (`3h`, `2d`, `4mo`). Epic pickers use the same order. `-o keys` and `-o json` keep Jira's order, so your JQL `ORDER BY` still applies there.
+
 Results open in a picker with the highlighted issue's details in a preview pane. Enter opens an actions menu:
 
 | Action | What it does |

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	jiralib "github.com/andygrunwald/go-jira"
 	"github.com/atotto/clipboard"
@@ -130,6 +131,11 @@ func executeQuery(cfg *config.Config, title, jql string, limit int, output strin
 	if output == "" && !stdoutIsTerminal() {
 		output = "table"
 	}
+	// Lists for people put active, recently touched work first; keys and
+	// JSON keep Jira's order for scripts.
+	if output == "" || output == "table" {
+		jira.SortForDisplay(issues)
+	}
 	switch output {
 	case "keys":
 		for _, is := range issues {
@@ -192,7 +198,32 @@ func fieldAssignee(is jiralib.Issue) string {
 }
 
 func issueRow(is jiralib.Issue) string {
-	return textutil.PadRight(is.Key, 12) + " " + textutil.PadRight(fieldStatus(is), 15) + " " + textutil.Truncate(fieldSummary(is), 60)
+	return textutil.PadRight(is.Key, 12) + " " + textutil.PadRight(fieldStatus(is), 15) + " " +
+		textutil.PadRight(shortAge(jira.UpdatedAt(is), time.Now()), 4) + " " + textutil.Truncate(fieldSummary(is), 60)
+}
+
+// shortAge renders how long ago t was: 5m, 3h, 2d, 3w, 4mo, 1y. Unknown
+// times render as "-".
+func shortAge(t, now time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+	d := now.Sub(t)
+	switch {
+	case d < time.Minute:
+		return "now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	case d < 14*24*time.Hour:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	case d < 60*24*time.Hour:
+		return fmt.Sprintf("%dw", int(d.Hours()/24/7))
+	case d < 365*24*time.Hour:
+		return fmt.Sprintf("%dmo", int(d.Hours()/24/30))
+	}
+	return fmt.Sprintf("%dy", int(d.Hours()/24/365))
 }
 
 // issuePreview renders the preview pane for an issue.
@@ -223,6 +254,9 @@ func issuePreview(is jiralib.Issue, width, height int) string {
 	}
 	if len(f.Labels) > 0 {
 		row("Labels", strings.Join(f.Labels, ", "))
+	}
+	if updated := jira.UpdatedAt(is); !updated.IsZero() {
+		row("Updated", shortAge(updated, time.Now())+" ago ("+updated.Local().Format("Jan 2 15:04")+")")
 	}
 	if f.Description != "" {
 		add("")

@@ -322,8 +322,10 @@ func (c *Client) TestConnection() error {
 
 // GetEpics returns open epics in the given project
 func (c *Client) GetEpics(projectKey string) ([]jira.Issue, error) {
-	jql := fmt.Sprintf("project = %s AND issuetype = Epic AND resolution = Unresolved ORDER BY created DESC", projectKey)
-	return c.SearchIssues(jql, 100)
+	jql := fmt.Sprintf("project = %s AND issuetype = Epic AND resolution = Unresolved ORDER BY updated DESC", projectKey)
+	epics, err := c.SearchIssues(jql, 100)
+	SortForDisplay(epics)
+	return epics, err
 }
 
 var accountIDRE = regexp.MustCompile(`^([0-9a-f]{24}|\d+:[0-9a-f-]{36})$`)

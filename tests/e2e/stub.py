@@ -18,10 +18,18 @@ EPICS = {
 }
 ADF = {"type": "doc", "version": 1, "content": [
     {"type": "paragraph", "content": [{"type": "text", "text": "Login fails on Safari."}]}]}
+# Returned in this (JQL) order; displayed In Progress, To Do, Done.
 TASKS = [
-    {"key": "OPS-1", "fields": {"summary": "Fix login", "status": {"name": "To Do"}, "issuetype": {"name": "Bug"},
+    {"key": "OPS-1", "fields": {"summary": "Fix login", "issuetype": {"name": "Bug"},
+                                "status": {"name": "To Do", "statusCategory": {"key": "new"}},
+                                "updated": "2026-09-01T10:00:00.000+0000",
                                 "assignee": {"displayName": "Ann"}, "description": ADF}},
-    {"key": "OPS-2", "fields": {"summary": "Write docs", "status": {"name": "In Progress"}, "issuetype": {"name": "Task"}}},
+    {"key": "OPS-2", "fields": {"summary": "Write docs", "issuetype": {"name": "Task"},
+                                "status": {"name": "In Progress", "statusCategory": {"key": "indeterminate"}},
+                                "updated": "2026-08-01T10:00:00.000+0000"}},
+    {"key": "OPS-3", "fields": {"summary": "Old cleanup", "issuetype": {"name": "Task"},
+                                "status": {"name": "Completed", "statusCategory": {"key": "done"}},
+                                "updated": "2026-10-04T10:00:00.000+0000"}},
 ]
 
 

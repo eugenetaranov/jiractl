@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"sort"
 	"strings"
 
 	jira "github.com/andygrunwald/go-jira"
@@ -84,9 +83,7 @@ func (c *Client) SearchEpics(project, text string) ([]jira.Issue, error) {
 	if err != nil {
 		return nil, err
 	}
-	sort.SliceStable(issues, func(i, j int) bool {
-		return !IsResolved(issues[i]) && IsResolved(issues[j])
-	})
+	SortForDisplay(issues)
 	return issues, nil
 }
 
