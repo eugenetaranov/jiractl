@@ -28,7 +28,7 @@ func TestResolveAccountID(t *testing.T) {
 		if r.URL.Query().Get("query") != "john@example.com" {
 			t.Errorf("query = %q", r.URL.Query().Get("query"))
 		}
-		io.WriteString(w, `[{"accountId":"abc123","displayName":"John","emailAddress":"john@example.com","active":true}]`)
+		_, _ = io.WriteString(w, `[{"accountId":"abc123","displayName":"John","emailAddress":"john@example.com","active":true}]`)
 	})
 	if id, err := c.ResolveAccountID("john@example.com"); err != nil || id != "abc123" {
 		t.Fatalf("got %q %v", id, err)
@@ -38,11 +38,11 @@ func TestResolveAccountID(t *testing.T) {
 func TestCreateIssueSendsComponentAndAccountID(t *testing.T) {
 	var body map[string]interface{}
 	c := newTestClient(t, &config.Config{}, func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/rest/api/2/issue":
-			json.NewDecoder(r.Body).Decode(&body)
+		switch r.URL.Path {
+		case "/rest/api/2/issue":
+			_ = json.NewDecoder(r.Body).Decode(&body)
 			w.WriteHeader(201)
-			io.WriteString(w, `{"key":"P-1"}`)
+			_, _ = io.WriteString(w, `{"key":"P-1"}`)
 		default:
 			t.Errorf("unexpected %s", r.URL.Path)
 		}
@@ -73,7 +73,7 @@ func TestCreateIssueSendsComponentAndAccountID(t *testing.T) {
 
 func TestResolveAccountIDAmbiguous(t *testing.T) {
 	c := newTestClient(t, &config.Config{}, func(w http.ResponseWriter, r *http.Request) {
-		io.WriteString(w, `[{"accountId":"1","displayName":"Ann A","active":true},{"accountId":"2","displayName":"Ann B","active":true}]`)
+		_, _ = io.WriteString(w, `[{"accountId":"1","displayName":"Ann A","active":true},{"accountId":"2","displayName":"Ann B","active":true}]`)
 	})
 	_, err := c.ResolveAccountID("ann")
 	if err == nil || !strings.Contains(err.Error(), "Ann A") || !strings.Contains(err.Error(), "Ann B") {
@@ -94,7 +94,7 @@ func TestResolveAccountIDPassthrough(t *testing.T) {
 func TestAPIErrorFormatting(t *testing.T) {
 	c := newTestClient(t, &config.Config{}, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(400)
-		io.WriteString(w, `{"errorMessages":[],"errors":{"summary":"Summary is required","parent":"Given parent is invalid"}}`)
+		_, _ = io.WriteString(w, `{"errorMessages":[],"errors":{"summary":"Summary is required","parent":"Given parent is invalid"}}`)
 	})
 	_, err := c.CreateIssue(&NewIssue{Project: "P", Type: "Task"})
 	apiErr, ok := err.(*APIError)
@@ -112,7 +112,7 @@ func TestAPIErrorFormatting(t *testing.T) {
 func TestSearchErrorIncludesJQLExplanation(t *testing.T) {
 	c := newTestClient(t, &config.Config{}, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(400)
-		io.WriteString(w, `{"errorMessages":["Error in the JQL Query: Expecting operator but got 'x'."]}`)
+		_, _ = io.WriteString(w, `{"errorMessages":["Error in the JQL Query: Expecting operator but got 'x'."]}`)
 	})
 	_, err := c.SearchIssues("bad x", 10)
 	if err == nil || !strings.Contains(err.Error(), "Expecting operator") {
@@ -135,7 +135,7 @@ func TestAnonymousClientServerInfo(t *testing.T) {
 		if r.Header.Get("Authorization") != "" {
 			t.Error("anonymous client sent credentials")
 		}
-		io.WriteString(w, `{"version":"9.4.0","deploymentType":"Server"}`)
+		_, _ = io.WriteString(w, `{"version":"9.4.0","deploymentType":"Server"}`)
 	})
 	info, err := c.GetServerInfo()
 	if err != nil || info.DeploymentType != "Server" {

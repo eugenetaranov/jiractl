@@ -78,7 +78,7 @@ func loadDraft() *issueDraft {
 
 func deleteDraft() {
 	if path, err := draftPath(); err == nil {
-		os.Remove(path)
+		_ = os.Remove(path)
 	}
 }
 

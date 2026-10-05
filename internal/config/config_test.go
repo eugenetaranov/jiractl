@@ -194,7 +194,7 @@ func TestWriteFailureLeavesOriginal(t *testing.T) {
 	if err := os.Chmod(dir, 0o500); err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chmod(dir, 0o700)
+	defer func() { _ = os.Chmod(dir, 0o700) }()
 
 	want := decode(t, sample)
 	want.Project = "NEW"
@@ -211,13 +211,15 @@ func TestUnknownKeysWarn(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	path := filepath.Join(home, ConfigFileName)
-	os.WriteFile(path, []byte("server = \"x\"\nproject = \"P\"\n[issue_defaults]\nasignee = \"bob\"\n"), 0o600)
+	if err := os.WriteFile(path, []byte("server = \"x\"\nproject = \"P\"\n[issue_defaults]\nasignee = \"bob\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	r, w, _ := os.Pipe()
 	old := os.Stderr
 	os.Stderr = w
 	_, err := Load()
-	w.Close()
+	_ = w.Close()
 	os.Stderr = old
 	if err != nil {
 		t.Fatal(err)

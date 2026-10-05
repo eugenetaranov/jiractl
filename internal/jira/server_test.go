@@ -24,7 +24,7 @@ func TestServerUsesBearerAndV2Search(t *testing.T) {
 		if r.URL.Path != "/rest/api/2/search" {
 			t.Errorf("path = %s", r.URL.Path)
 		}
-		io.WriteString(w, `{"issues":[{"key":"OPS-1","fields":{"summary":"s","description":"plain text"}}]}`)
+		_, _ = io.WriteString(w, `{"issues":[{"key":"OPS-1","fields":{"summary":"s","description":"plain text"}}]}`)
 	})
 	issues, err := c.SearchIssues("project = OPS", 10)
 	if err != nil || len(issues) != 1 || issues[0].Fields.Description != "plain text" {
@@ -44,13 +44,13 @@ func createMetaHandler(t *testing.T, fields string, body *map[string]interface{}
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/rest/api/2/issue/createmeta/OPS/issuetypes":
-			io.WriteString(w, `{"values":[{"id":"10","name":"Task"}]}`)
+			_, _ = io.WriteString(w, `{"values":[{"id":"10","name":"Task"}]}`)
 		case "/rest/api/2/issue/createmeta/OPS/issuetypes/10":
-			io.WriteString(w, `{"values":`+fields+`}`)
+			_, _ = io.WriteString(w, `{"values":`+fields+`}`)
 		case "/rest/api/2/issue":
-			json.NewDecoder(r.Body).Decode(body)
+			_ = json.NewDecoder(r.Body).Decode(body)
 			w.WriteHeader(201)
-			io.WriteString(w, `{"key":"OPS-2"}`)
+			_, _ = io.WriteString(w, `{"key":"OPS-2"}`)
 		default:
 			t.Errorf("unexpected %s", r.URL.Path)
 			w.WriteHeader(404)
@@ -108,10 +108,10 @@ func TestParseJQLFallsBackOnServer(t *testing.T) {
 		}
 		if strings.Contains(r.URL.Query().Get("jql"), "bad") {
 			w.WriteHeader(400)
-			io.WriteString(w, `{"errorMessages":["Field 'bad' does not exist."]}`)
+			_, _ = io.WriteString(w, `{"errorMessages":["Field 'bad' does not exist."]}`)
 			return
 		}
-		io.WriteString(w, `{"issues":[]}`)
+		_, _ = io.WriteString(w, `{"issues":[]}`)
 	})
 	res, err := c.ParseJQL([]string{"project = OPS", "bad = 1"})
 	if err != nil || len(res[0]) != 0 || len(res[1]) != 1 || !strings.Contains(res[1][0], "does not exist") {

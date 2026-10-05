@@ -29,10 +29,10 @@ func TestSearchEpicsFallsBackAndSortsOpenFirst(t *testing.T) {
 		calls++
 		if strings.Contains(r.URL.Query().Get("jql"), "*") {
 			w.WriteHeader(400)
-			io.WriteString(w, `{"errorMessages":["wildcards not allowed"]}`)
+			_, _ = io.WriteString(w, `{"errorMessages":["wildcards not allowed"]}`)
 			return
 		}
-		io.WriteString(w, `{"issues":[
+		_, _ = io.WriteString(w, `{"issues":[
 			{"key":"OPS-1","fields":{"summary":"done one","resolution":{"name":"Done"}}},
 			{"key":"OPS-2","fields":{"summary":"open one"}}]}`)
 	})
@@ -50,11 +50,11 @@ func TestCheckEpic(t *testing.T) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/OPS-404"):
 			w.WriteHeader(404)
-			io.WriteString(w, `{"errorMessages":["Issue does not exist"]}`)
+			_, _ = io.WriteString(w, `{"errorMessages":["Issue does not exist"]}`)
 		case strings.HasSuffix(r.URL.Path, "/OPS-5"):
-			io.WriteString(w, `{"key":"OPS-5","fields":{"issuetype":{"name":"Story"}}}`)
+			_, _ = io.WriteString(w, `{"key":"OPS-5","fields":{"issuetype":{"name":"Story"}}}`)
 		default:
-			io.WriteString(w, `{"key":"OPS-40","fields":{"issuetype":{"name":"Epic"},"summary":"k8s"}}`)
+			_, _ = io.WriteString(w, `{"key":"OPS-40","fields":{"issuetype":{"name":"Epic"},"summary":"k8s"}}`)
 		}
 	})
 	for key, want := range map[string]EpicState{"OPS-404": EpicNotFound, "OPS-5": EpicNotAnEpic, "OPS-40": EpicOK} {

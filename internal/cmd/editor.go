@@ -30,16 +30,18 @@ func openEditor(initial string) (string, error) {
 		return "", err
 	}
 	path := f.Name()
-	defer os.Remove(path)
+	defer func() { _ = os.Remove(path) }()
 
 	if initial != "" {
 		initial += "\n"
 	}
-	if _, err := f.WriteString(initial); err != nil {
-		f.Close()
+	_, err = f.WriteString(initial)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
 		return "", err
 	}
-	f.Close()
 
 	args := editorCommand()
 	cmd := exec.Command(args[0], append(args[1:], path)...)

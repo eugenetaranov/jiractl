@@ -67,7 +67,7 @@ func newAPIError(resp *http.Response) *APIError {
 	if resp.Body == nil {
 		return apiErr
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 
 	var parsed struct {

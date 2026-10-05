@@ -221,7 +221,7 @@ func (c *Client) SearchIssues(jql string, maxResults int) ([]jira.Issue, error) 
 	if err != nil {
 		return nil, wrapError(resp, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Issues []json.RawMessage `json:"issues"`
@@ -280,7 +280,7 @@ func (c *Client) GetIssueRaw(key string, debug bool) (*RawIssue, []byte, error) 
 	if err != nil {
 		return nil, nil, wrapError(resp, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

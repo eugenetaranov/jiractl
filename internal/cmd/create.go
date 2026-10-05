@@ -465,12 +465,12 @@ func reviewRows(draft *issueDraft, names *fieldNames, epic *jiralib.Issue, defau
 }
 
 func printReview(project string, rows []reviewRow) {
-	w := os.Stderr
 	width := 0
 	for _, r := range rows {
 		width = max(width, textutil.Width(r.label))
 	}
-	fmt.Fprintf(w, "\nCreating issue in %s:\n", project)
+	var sb strings.Builder
+	sb.WriteString("\nCreating issue in " + project + ":\n")
 	for _, r := range rows {
 		lines := strings.Split(r.value, "\n")
 		const maxLines = 6
@@ -483,12 +483,13 @@ func printReview(project string, rows []reviewRow) {
 			if i == 0 {
 				label = r.label + ":"
 			}
-			fmt.Fprintf(w, "  %s %s\n", textutil.PadRight(label, width+1), line)
+			sb.WriteString("  " + textutil.PadRight(label, width+1) + " " + line + "\n")
 		}
 		if len(lines) > maxLines {
-			fmt.Fprintf(w, "  %s … (%d more lines)\n", textutil.PadRight("", width+1), len(lines)-maxLines)
+			fmt.Fprintf(&sb, "  %s … (%d more lines)\n", textutil.PadRight("", width+1), len(lines)-maxLines)
 		}
 	}
+	fmt.Fprint(os.Stderr, sb.String())
 }
 
 // reviewLoop shows the payload and handles Create? [Y/e/d/n]. It returns
@@ -528,7 +529,7 @@ func promptChoice(prompt, valid string) (byte, error) {
 			return 0, err
 		}
 		line, err := rl.Readline()
-		rl.Close()
+		_ = rl.Close()
 		if err != nil {
 			return 0, ErrCancelled
 		}

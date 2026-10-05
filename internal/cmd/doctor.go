@@ -34,8 +34,8 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		if err := doctor.PrintJSON(os.Stdout, results); err != nil {
 			return err
 		}
-	} else {
-		doctor.Print(os.Stdout, results, fancyOutput())
+	} else if err := doctor.Print(os.Stdout, results, fancyOutput()); err != nil {
+		return err
 	}
 	if doctor.Failed(results) {
 		return errSilentFailure
@@ -52,5 +52,5 @@ func fancyOutput() bool {
 func runPostConfigureDoctor() {
 	fmt.Fprintln(os.Stderr, "\nChecking setup...")
 	results := doctor.Run(doctor.NewCtx(), doctor.Checks(false))
-	doctor.Print(os.Stderr, results, term.IsTerminal(int(os.Stderr.Fd())) && os.Getenv("NO_COLOR") == "")
+	_ = doctor.Print(os.Stderr, results, term.IsTerminal(int(os.Stderr.Fd())) && os.Getenv("NO_COLOR") == "")
 }

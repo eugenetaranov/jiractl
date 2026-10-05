@@ -16,12 +16,12 @@ func TestDefaultEpicLine(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/OPS-40"):
-			io.WriteString(w, `{"key":"OPS-40","fields":{"issuetype":{"name":"Epic"},"summary":"DevOps k8s cluster upgrade"}}`)
+			_, _ = io.WriteString(w, `{"key":"OPS-40","fields":{"issuetype":{"name":"Epic"},"summary":"DevOps k8s cluster upgrade"}}`)
 		case strings.HasSuffix(r.URL.Path, "/OPS-41"):
-			io.WriteString(w, `{"key":"OPS-41","fields":{"issuetype":{"name":"Epic"},"summary":"Old","resolution":{"name":"Done"}}}`)
+			_, _ = io.WriteString(w, `{"key":"OPS-41","fields":{"issuetype":{"name":"Epic"},"summary":"Old","resolution":{"name":"Done"}}}`)
 		case strings.HasSuffix(r.URL.Path, "/OPS-50"):
 			time.Sleep(2 * time.Second)
-			io.WriteString(w, `{}`)
+			_, _ = io.WriteString(w, `{}`)
 		default:
 			w.WriteHeader(404)
 		}

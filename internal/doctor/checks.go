@@ -124,7 +124,7 @@ func checkCreds(ctx *Ctx) Result {
 		return fail("no username or API token in the system keyring", configureHint)
 	case ctx.Token == "":
 		return fail("no API token in the system keyring", configureHint)
-	case ctx.Username == "" && !(ctx.Cfg != nil && ctx.Cfg.IsServer()):
+	case ctx.Username == "" && (ctx.Cfg == nil || !ctx.Cfg.IsServer()):
 		return fail("no username in the system keyring", configureHint)
 	}
 	if ctx.Username == "" {
@@ -321,9 +321,15 @@ func checkDefaultFields(ctx *Ctx) Result {
 	var missing []string
 	for _, f := range fields {
 		_, covered := d.CustomFields[f.ID]
-		if f.Required && !f.HasDefault && !covered && !standardFields[f.ID] &&
-			!(f.ID == "components" && d.Component != "") && !(f.ID == "assignee" && d.Assignee != "") &&
-			!(f.ID == "labels" && len(d.Labels) > 0) {
+		switch f.ID {
+		case "components":
+			covered = covered || d.Component != ""
+		case "assignee":
+			covered = covered || d.Assignee != ""
+		case "labels":
+			covered = covered || len(d.Labels) > 0
+		}
+		if f.Required && !f.HasDefault && !covered && !standardFields[f.ID] {
 			missing = append(missing, fmt.Sprintf("%s (%s)", f.Name, f.ID))
 		}
 	}

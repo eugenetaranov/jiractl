@@ -116,11 +116,12 @@ func Failed(results []Result) bool {
 
 // Print writes results for people. fancy selects ✓/!/✗ markers and color;
 // otherwise plain ASCII markers are used.
-func Print(w io.Writer, results []Result, fancy bool) {
+func Print(w io.Writer, results []Result, fancy bool) error {
 	width := 0
 	for _, r := range results {
 		width = max(width, len(r.Title))
 	}
+	var sb strings.Builder
 	for _, r := range results {
 		marker := "[" + r.Status.String() + "]"
 		if fancy {
@@ -132,16 +133,18 @@ func Print(w io.Writer, results []Result, fancy bool) {
 		if r.Detail != "" {
 			line += "  " + r.Detail
 		}
-		fmt.Fprintln(w, strings.TrimRight(line, " "))
+		sb.WriteString(strings.TrimRight(line, " ") + "\n")
 		if r.Hint != "" && (r.Status == Warn || r.Status == Fail) {
-			fmt.Fprintf(w, "  → %s\n", r.Hint)
+			sb.WriteString("  → " + r.Hint + "\n")
 		}
 	}
 	counts := map[Status]int{}
 	for _, r := range results {
 		counts[r.Status]++
 	}
-	fmt.Fprintf(w, "\n%d ok, %d warnings, %d failed, %d skipped\n", counts[OK], counts[Warn], counts[Fail], counts[Skip])
+	fmt.Fprintf(&sb, "\n%d ok, %d warnings, %d failed, %d skipped\n", counts[OK], counts[Warn], counts[Fail], counts[Skip])
+	_, err := io.WriteString(w, sb.String())
+	return err
 }
 
 // PrintJSON writes results as a JSON array.

@@ -26,13 +26,13 @@ func (f *fakeJira) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path
 	switch {
 	case p == "/rest/api/2/serverInfo":
-		io.WriteString(w, `{"version":"1001.0.0","deploymentType":"Cloud"}`)
+		_, _ = io.WriteString(w, `{"version":"1001.0.0","deploymentType":"Cloud"}`)
 	case f.authFails:
 		w.WriteHeader(401)
 	case p == "/rest/api/2/myself":
-		io.WriteString(w, `{"accountId":"me","displayName":"Eugene","emailAddress":"e@example.com"}`)
+		_, _ = io.WriteString(w, `{"accountId":"me","displayName":"Eugene","emailAddress":"e@example.com"}`)
 	case p == "/rest/api/2/project/OPS":
-		io.WriteString(w, `{"key":"OPS","issueTypes":[{"id":"1","name":"Task"},{"id":"2","name":"Bug"}]}`)
+		_, _ = io.WriteString(w, `{"key":"OPS","issueTypes":[{"id":"1","name":"Task"},{"id":"2","name":"Bug"}]}`)
 	case p == "/rest/api/2/mypermissions":
 		perm := func(b bool) string {
 			if b {
@@ -40,10 +40,10 @@ func (f *fakeJira) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			return `{"havePermission":false}`
 		}
-		io.WriteString(w, `{"permissions":{"BROWSE_PROJECTS":`+perm(true)+`,"CREATE_ISSUES":`+perm(!f.noCreate)+
+		_, _ = io.WriteString(w, `{"permissions":{"BROWSE_PROJECTS":`+perm(true)+`,"CREATE_ISSUES":`+perm(!f.noCreate)+
 			`,"ASSIGN_ISSUES":`+perm(true)+`,"TRANSITION_ISSUES":`+perm(!f.noTransit)+`,"ADD_COMMENTS":`+perm(true)+`}}`)
 	case p == "/rest/api/2/issue/OPS-40":
-		io.WriteString(w, `{"key":"OPS-40","fields":{"issuetype":{"name":"Epic"},"summary":"k8s"}}`)
+		_, _ = io.WriteString(w, `{"key":"OPS-40","fields":{"issuetype":{"name":"Epic"},"summary":"k8s"}}`)
 	case p == "/rest/api/2/project/OPS/components":
 		b, _ := json.Marshal(func() []map[string]string {
 			var out []map[string]string
@@ -52,25 +52,25 @@ func (f *fakeJira) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			return out
 		}())
-		w.Write(b)
+		_, _ = w.Write(b)
 	case p == "/rest/api/2/issue/createmeta/OPS/issuetypes":
-		io.WriteString(w, `{"issueTypes":[{"id":"1","name":"Task"}]}`)
+		_, _ = io.WriteString(w, `{"issueTypes":[{"id":"1","name":"Task"}]}`)
 	case p == "/rest/api/2/issue/createmeta/OPS/issuetypes/1":
 		field := f.createField
 		if field == "" {
 			field = "customfield_15838"
 		}
-		io.WriteString(w, `{"fields":[{"fieldId":"summary","name":"Summary","required":true},
+		_, _ = io.WriteString(w, `{"fields":[{"fieldId":"summary","name":"Summary","required":true},
 			{"fieldId":"`+field+`","name":"Work Allocation","required":true,"allowedValues":[{"value":"Operations"},{"value":"Projects"}]}]}`)
 	case p == "/rest/api/3/jql/parse":
 		if f.badJQL {
-			io.WriteString(w, `{"queries":[{"errors":[]},{"errors":["Error in the JQL Query: Expecting a date but got '-7x'."]}]}`)
+			_, _ = io.WriteString(w, `{"queries":[{"errors":[]},{"errors":["Error in the JQL Query: Expecting a date but got '-7x'."]}]}`)
 		} else {
-			io.WriteString(w, `{"queries":[{"errors":[]},{"errors":[]}]}`)
+			_, _ = io.WriteString(w, `{"queries":[{"errors":[]},{"errors":[]}]}`)
 		}
 	default:
 		w.WriteHeader(404)
-		io.WriteString(w, `{"errorMessages":["no stub for `+p+`"]}`)
+		_, _ = io.WriteString(w, `{"errorMessages":["no stub for `+p+`"]}`)
 	}
 }
 
@@ -187,7 +187,9 @@ func TestComponentSuggestion(t *testing.T) {
 
 func TestJSONOutput(t *testing.T) {
 	var buf bytes.Buffer
-	PrintJSON(&buf, []Result{{ID: "auth", Title: "Authentication", Status: Fail, Detail: "x", Hint: "y"}})
+	if err := PrintJSON(&buf, []Result{{ID: "auth", Title: "Authentication", Status: Fail, Detail: "x", Hint: "y"}}); err != nil {
+		t.Fatal(err)
+	}
 	var out []map[string]string
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil || out[0]["status"] != "fail" || out[0]["id"] != "auth" {
 		t.Fatalf("%s %v", buf.String(), err)

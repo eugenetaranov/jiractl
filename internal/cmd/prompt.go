@@ -55,7 +55,7 @@ func promptTextWithDefault(label, defaultVal string, required bool) (string, err
 	if err != nil {
 		return "", err
 	}
-	defer rl.Close()
+	defer func() { _ = rl.Close() }()
 
 	for {
 		line, err := rl.Readline()
@@ -88,7 +88,7 @@ func promptMultilineText(label string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer rl.Close()
+	defer func() { _ = rl.Close() }()
 
 	var lines []string
 	for {
@@ -107,7 +107,7 @@ func promptMultilineText(label string) (string, error) {
 		case ".":
 			return joinLines(lines), nil
 		case ":e":
-			rl.Close()
+			_ = rl.Close()
 			return openEditor(joinLines(lines))
 		}
 		lines = append(lines, line)
@@ -131,7 +131,7 @@ func promptConfirm(label string, defaultYes bool) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer rl.Close()
+	defer func() { _ = rl.Close() }()
 
 	line, err := rl.Readline()
 	if err == readline.ErrInterrupt || err == io.EOF {

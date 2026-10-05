@@ -150,7 +150,9 @@ func runAuthTest(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "  Token length: %d\n", len(ctx.Token))
 	}
 	results := doctor.Run(ctx, checks)
-	doctor.Print(os.Stdout, results, fancyOutput())
+	if err := doctor.Print(os.Stdout, results, fancyOutput()); err != nil {
+		return err
+	}
 	if doctor.Failed(results) {
 		return errSilentFailure
 	}
