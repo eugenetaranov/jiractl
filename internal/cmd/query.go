@@ -2,9 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/eugenetaranov/jiractl/internal/jira"
-	fuzzyfinder "github.com/ktr0731/go-fuzzyfinder"
+	"github.com/eugenetaranov/jiractl/internal/textutil"
 	"github.com/spf13/cobra"
 )
 
@@ -21,8 +22,6 @@ func init() {
 }
 
 func runQueryCmd(cmd *cobra.Command, args []string) error {
-	cmd.SilenceUsage = true
-
 	if len(args) == 0 {
 		return runQueryInteractive()
 	}
@@ -53,16 +52,16 @@ func runQuery(queryName string) error {
 		limit = 50
 	}
 
-	fmt.Printf("Running query: %s\n", queryName)
-	fmt.Printf("JQL: %s\n\n", jql)
+	fmt.Fprintf(os.Stderr, "Running query: %s\n", queryName)
+	fmt.Fprintf(os.Stderr, "JQL: %s\n\n", jql)
 
 	issues, err := client.SearchIssues(jql, limit)
 	if err != nil {
-		return fmt.Errorf("query failed: %w", err)
+		return fmt.Errorf("query %q failed: %w", queryName, err)
 	}
 
 	if len(issues) == 0 {
-		fmt.Println("No issues found.")
+		fmt.Fprintln(os.Stderr, "No issues found.")
 		return nil
 	}
 
@@ -77,19 +76,12 @@ func runQuery(queryName string) error {
 		if issue.Fields != nil {
 			summary = issue.Fields.Summary
 		}
-		// Truncate summary if too long
-		if len(summary) > 60 {
-			summary = summary[:57] + "..."
-		}
-		items[i] = fmt.Sprintf("%-12s %-15s %s", issue.Key, status, summary)
+		items[i] = textutil.PadRight(issue.Key, 12) + " " + textutil.PadRight(status, 15) + " " + textutil.Truncate(summary, 60)
 	}
 
 	idx, err := fzfSelect(items, fmt.Sprintf("Select issue (%d found)", len(issues)))
 	if err != nil {
-		if err == fuzzyfinder.ErrAbort {
-			return nil
-		}
-		return fmt.Errorf("prompt failed: %w", err)
+		return err
 	}
 
 	// Show selected issue details
@@ -100,7 +92,7 @@ func runQuery(queryName string) error {
 func showIssueDetails(client *jira.Client, server, key string) error {
 	issue, err := client.GetIssue(key)
 	if err != nil {
-		return fmt.Errorf("failed to get issue: %w", err)
+		return fmt.Errorf("failed to get issue %s: %w", key, err)
 	}
 
 	fmt.Printf("\n%s: %s\n", issue.Key, issue.Fields.Summary)

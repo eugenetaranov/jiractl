@@ -1,195 +1,251 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"strings"
-	"syscall"
 
+	jiralib "github.com/andygrunwald/go-jira"
 	"github.com/eugenetaranov/jiractl/internal/config"
 	"github.com/eugenetaranov/jiractl/internal/jira"
 	"github.com/eugenetaranov/jiractl/internal/keyring"
-	fuzzyfinder "github.com/ktr0731/go-fuzzyfinder"
+	"github.com/eugenetaranov/jiractl/internal/textutil"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 var configureCmd = &cobra.Command{
 	Use:   "configure",
 	Short: "Configure jiractl settings",
-	Long:  `Interactive setup for jiractl. Prompts for server URL, project key, username, and API token.`,
-	RunE:  runConfigure,
+	Long: `Interactive setup for jiractl. Prompts for server URL, project key, username, and API token.
+Nothing is saved until the connection, credentials and project have been verified.`,
+	RunE: runConfigure,
 }
 
 func init() {
 	RootCmd.AddCommand(configureCmd)
 }
 
-func runConfigure(cmd *cobra.Command, args []string) error {
-	cmd.SilenceUsage = true
+const maxConfigureAttempts = 3
 
+// configureField names the value that failed validation and must be re-asked.
+type configureField string
+
+const (
+	fieldServer  configureField = "server"
+	fieldToken   configureField = "credentials"
+	fieldProject configureField = "project"
+)
+
+type validationError struct {
+	field configureField
+	err   error
+}
+
+func (v *validationError) Error() string { return v.err.Error() }
+
+func runConfigure(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
+	// Work on a copy; cfg stays as the last saved state until validation passes.
+	updated := *cfg
 
-	// Get current credentials for defaults
 	currentUsername, _ := keyring.GetUsername()
+	existingToken, _ := keyring.GetToken()
 
-	// Prompt for server URL
-	server, err := promptTextWithDefault("Jira Server URL", cfg.Server, true)
+	server, err := promptServer(cfg.Server)
 	if err != nil {
-		if err == ErrPromptCancelled {
-			fmt.Println("\nConfiguration cancelled.")
-			return nil
-		}
 		return err
 	}
-	if !strings.HasPrefix(server, "http://") && !strings.HasPrefix(server, "https://") {
-		return fmt.Errorf("server URL must start with http:// or https://")
-	}
-	cfg.Server = strings.TrimRight(server, "/")
-
-	// Prompt for project key
 	project, err := promptTextWithDefault("Default Project Key", cfg.Project, true)
 	if err != nil {
-		if err == ErrPromptCancelled {
-			fmt.Println("\nConfiguration cancelled.")
-			return nil
-		}
 		return err
 	}
-	cfg.Project = strings.ToUpper(project)
-
-	// Prompt for username
 	username, err := promptTextWithDefault("Username (email)", currentUsername, true)
 	if err != nil {
-		if err == ErrPromptCancelled {
-			fmt.Println("\nConfiguration cancelled.")
-			return nil
-		}
 		return err
 	}
-
-	// Check if token already exists
-	existingToken, _ := keyring.GetToken()
-	hasExistingToken := existingToken != ""
-
-	// Prompt for API token using term.ReadPassword (handles paste correctly)
-	if hasExistingToken {
-		fmt.Print("API Token (leave empty to keep existing): ")
-	} else {
-		fmt.Print("API Token: ")
+	tokenLabel := "API Token: "
+	if existingToken != "" {
+		tokenLabel = "API Token (leave empty to keep existing): "
 	}
-	tokenBytes, err := term.ReadPassword(int(syscall.Stdin))
-	fmt.Println()
+	token, err := readSecret(tokenLabel)
 	if err != nil {
-		return fmt.Errorf("failed to read token: %w", err)
+		return err
 	}
-	token := strings.TrimSpace(string(tokenBytes))
-
-	// Require token on first-time setup
-	if token == "" && !hasExistingToken {
-		return fmt.Errorf("API token is required")
-	}
-
-	// Save credentials to keyring
-	credentialsUpdated := false
-	if err := keyring.SetUsername(username); err != nil {
-		return fmt.Errorf("failed to save username: %w", err)
-	}
-	// Only update token if a new one was entered
-	if token != "" {
-		if err := keyring.SetToken(token); err != nil {
-			return fmt.Errorf("failed to save token: %w", err)
+	if token == "" && existingToken == "" {
+		token, err = promptRequiredSecret("API Token: ")
+		if err != nil {
+			return err
 		}
-		credentialsUpdated = true
 	}
 
-	// Save config to file (initial save to test connection)
-	if err := cfg.Save(); err != nil {
-		return fmt.Errorf("failed to save config: %w", err)
+	attempts := map[configureField]int{}
+	var client *jira.Client
+	var issueTypes []jiralib.IssueType
+	for {
+		updated.Server = server
+		updated.Project = strings.ToUpper(project)
+		effectiveToken := token
+		if effectiveToken == "" {
+			effectiveToken = existingToken
+		}
+
+		fmt.Fprint(os.Stderr, "\nTesting connection... ")
+		client, issueTypes, err = validateSetup(&updated, username, effectiveToken)
+		if err == nil {
+			fmt.Fprintln(os.Stderr, "success!")
+			break
+		}
+		fmt.Fprintln(os.Stderr, "failed")
+
+		var verr *validationError
+		if !errors.As(err, &verr) {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "  %v\n", verr.err)
+		attempts[verr.field]++
+		if attempts[verr.field] >= maxConfigureAttempts {
+			return fmt.Errorf("%s check failed %d times, nothing was saved: %w", verr.field, maxConfigureAttempts, verr.err)
+		}
+
+		switch verr.field {
+		case fieldServer:
+			server, err = promptServer(server)
+		case fieldToken:
+			username, err = promptTextWithDefault("Username (email)", username, true)
+			if err == nil {
+				token, err = promptRequiredSecret("API Token: ")
+			}
+		case fieldProject:
+			project, err = promptTextWithDefault("Default Project Key", "", true)
+		}
+		if err != nil {
+			return err
+		}
 	}
 
-	// Test connection and fetch issue types
-	fmt.Print("\nTesting connection... ")
-	client, err := jira.NewClient(cfg)
-	if err != nil {
-		fmt.Printf("failed: %v\n", err)
-		return nil
-	}
-
-	if err := client.TestConnection(); err != nil {
-		fmt.Printf("failed: %v\n", err)
-		return nil
-	}
-	fmt.Println("success!")
-
-	// Fetch issue types and prompt for default
-	issueTypes, err := client.GetIssueTypes(cfg.Project)
-	if err != nil {
-		fmt.Printf("Warning: could not fetch issue types: %v\n", err)
-	} else if len(issueTypes) > 0 {
+	// Optional defaults. Esc keeps the previous value.
+	if len(issueTypes) > 0 {
 		typeNames := make([]string, len(issueTypes))
 		for i, it := range issueTypes {
 			typeNames[i] = it.Name
 		}
-
-		idx, err := fzfSelect(typeNames, "Select default issue type")
-		if err != nil {
-			if err != fuzzyfinder.ErrAbort {
-				return err
-			}
-		} else {
-			cfg.IssueDefaults.IssueType = typeNames[idx]
-			if err := cfg.Save(); err != nil {
-				return fmt.Errorf("failed to save config: %w", err)
-			}
+		idx, err := fzfSelect(typeNames, "Select default issue type (Esc keeps current)")
+		switch {
+		case err == nil:
+			updated.IssueDefaults.IssueType = typeNames[idx]
+		case !errors.Is(err, ErrCancelled):
+			return err
 		}
 	}
 
-	// Fetch epics and prompt for default epic link
-	epics, err := client.GetEpics(cfg.Project)
+	epics, err := client.GetEpics(updated.Project)
 	if err != nil {
-		fmt.Printf("Warning: could not fetch epics: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Warning: could not fetch epics: %v\n", err)
 	} else if len(epics) > 0 {
 		epicItems := make([]string, len(epics)+1)
 		epicItems[0] = "(None)"
 		for i, epic := range epics {
-			summary := ""
-			if epic.Fields != nil {
-				summary = epic.Fields.Summary
-			}
-			if len(summary) > 50 {
-				summary = summary[:47] + "..."
-			}
-			epicItems[i+1] = fmt.Sprintf("%s - %s", epic.Key, summary)
+			epicItems[i+1] = epicLabel(epic)
 		}
-
-		idx, err := fzfSelect(epicItems, "Select default epic (optional)")
-		if err != nil {
-			if err != fuzzyfinder.ErrAbort {
-				return err
-			}
-		} else if idx > 0 {
-			// User selected an epic (not "None")
-			cfg.IssueDefaults.EpicLink = epics[idx-1].Key
-			if err := cfg.Save(); err != nil {
-				return fmt.Errorf("failed to save config: %w", err)
-			}
-		} else {
-			// User selected "None", clear any existing epic link
-			cfg.IssueDefaults.EpicLink = ""
-			if err := cfg.Save(); err != nil {
-				return fmt.Errorf("failed to save config: %w", err)
-			}
+		idx, err := fzfSelect(epicItems, "Select default epic (Esc keeps current)")
+		switch {
+		case err == nil && idx > 0:
+			updated.IssueDefaults.EpicLink = epics[idx-1].Key
+		case err == nil:
+			updated.IssueDefaults.EpicLink = ""
+		case !errors.Is(err, ErrCancelled):
+			return err
 		}
 	}
 
-	fmt.Println("\nConfiguration saved!")
-	fmt.Printf("  Config file: ~/.jiractl.toml\n")
-	if credentialsUpdated {
-		fmt.Printf("  Credentials: stored in system keyring\n")
+	// Everything checked out: persist once.
+	if err := keyring.SetUsername(username); err != nil {
+		return fmt.Errorf("failed to save username: %w", err)
+	}
+	if token != "" {
+		if err := keyring.SetToken(token); err != nil {
+			return fmt.Errorf("failed to save token: %w", err)
+		}
+	}
+	if err := updated.Save(); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
 	}
 
+	fmt.Println("\nConfiguration saved to ~/.jiractl.toml")
+	fmt.Printf("  Server:             %s\n", updated.Server)
+	fmt.Printf("  Project:            %s\n", updated.Project)
+	fmt.Printf("  Default issue type: %s\n", orNone(updated.IssueDefaults.IssueType))
+	fmt.Printf("  Default epic:       %s\n", orNone(updated.IssueDefaults.EpicLink))
+	if token != "" {
+		fmt.Println("  Credentials:        stored in system keyring")
+	}
 	return nil
+}
+
+// validateSetup checks server, credentials and project using in-memory values.
+func validateSetup(cfg *config.Config, username, token string) (*jira.Client, []jiralib.IssueType, error) {
+	client, err := jira.NewClientWith(cfg, username, token)
+	if err != nil {
+		return nil, nil, &validationError{fieldServer, err}
+	}
+
+	if err := client.TestConnection(); err != nil {
+		switch jira.StatusOf(err) {
+		case 401, 403:
+			return nil, nil, &validationError{fieldToken, fmt.Errorf("credentials rejected: %w", err)}
+		default:
+			return nil, nil, &validationError{fieldServer, fmt.Errorf("cannot reach Jira at %s: %w", cfg.Server, err)}
+		}
+	}
+
+	issueTypes, err := client.GetIssueTypes(cfg.Project)
+	if err != nil {
+		if jira.StatusOf(err) == 404 {
+			return nil, nil, &validationError{fieldProject, fmt.Errorf("project %s not found or not visible to you", cfg.Project)}
+		}
+		return nil, nil, &validationError{fieldProject, fmt.Errorf("cannot load project %s: %w", cfg.Project, err)}
+	}
+	return client, issueTypes, nil
+}
+
+func promptServer(current string) (string, error) {
+	for {
+		server, err := promptTextWithDefault("Jira Server URL", current, true)
+		if err != nil {
+			return "", err
+		}
+		if strings.HasPrefix(server, "http://") || strings.HasPrefix(server, "https://") {
+			return strings.TrimRight(server, "/"), nil
+		}
+		fmt.Fprintln(os.Stderr, "Server URL must start with http:// or https://")
+	}
+}
+
+func promptRequiredSecret(label string) (string, error) {
+	for {
+		token, err := readSecret(label)
+		if err != nil || token != "" {
+			return token, err
+		}
+		fmt.Fprintln(os.Stderr, "This field is required")
+	}
+}
+
+func epicLabel(epic jiralib.Issue) string {
+	summary := ""
+	if epic.Fields != nil {
+		summary = epic.Fields.Summary
+	}
+	return fmt.Sprintf("%s - %s", epic.Key, textutil.Truncate(summary, 50))
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "(none)"
+	}
+	return s
 }

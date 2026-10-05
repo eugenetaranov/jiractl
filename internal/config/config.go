@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/BurntSushi/toml"
 )
@@ -43,6 +44,13 @@ func ConfigPath() (string, error) {
 	return filepath.Join(home, ConfigFileName), nil
 }
 
+// warnedKeys makes sure each unknown key is reported once per process even
+// though the config is loaded by several code paths.
+var (
+	warnedMu   sync.Mutex
+	warnedKeys = map[string]bool{}
+)
+
 func Load() (*Config, error) {
 	path, err := ConfigPath()
 	if err != nil {
@@ -54,30 +62,115 @@ func Load() (*Config, error) {
 		return cfg, nil
 	}
 
-	if _, err := toml.DecodeFile(path, cfg); err != nil {
+	md, err := toml.DecodeFile(path, cfg)
+	if err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
+
+	warnedMu.Lock()
+	for _, key := range md.Undecoded() {
+		k := key.String()
+		if !warnedKeys[k] {
+			warnedKeys[k] = true
+			fmt.Fprintf(os.Stderr, "warning: unknown config key %q in ~/%s\n", k, ConfigFileName)
+		}
+	}
+	warnedMu.Unlock()
 
 	return cfg, nil
 }
 
+// Save writes the config to disk. Only keys whose values changed are touched,
+// so comments and formatting in the existing file survive. The write is
+// atomic (temp file + rename) and the file is private (0600).
 func (c *Config) Save() error {
 	path, err := ConfigPath()
 	if err != nil {
 		return err
 	}
+	return c.saveTo(path)
+}
 
-	f, err := os.Create(path)
-	if err != nil {
-		return fmt.Errorf("failed to create config file: %w", err)
+func (c *Config) saveTo(path string) error {
+	original, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to read config file: %w", err)
 	}
-	defer f.Close()
 
-	encoder := toml.NewEncoder(f)
-	if err := encoder.Encode(c); err != nil {
+	var out []byte
+	if len(original) == 0 {
+		out, err = encode(c)
+		if err != nil {
+			return err
+		}
+	} else {
+		patched, ok := patchConfig(string(original), c)
+		if ok {
+			out = []byte(patched)
+		} else {
+			// The file has a layout the patcher can't edit safely (inline
+			// tables, multi-line arrays, changed queries...). Keep a backup
+			// and rewrite it from scratch.
+			backup := path + ".bak"
+			if err := writeAtomic(backup, original); err != nil {
+				return fmt.Errorf("failed to write config backup: %w", err)
+			}
+			fmt.Fprintf(os.Stderr, "warning: rewrote ~/%s from scratch; previous version saved to %s\n", ConfigFileName, backup)
+			out, err = encode(c)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	if err := writeAtomic(path, out); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
+	return nil
+}
 
+func encode(c *Config) ([]byte, error) {
+	var sb strings.Builder
+	if err := toml.NewEncoder(&sb).Encode(c); err != nil {
+		return nil, fmt.Errorf("failed to encode config: %w", err)
+	}
+	return []byte(sb.String()), nil
+}
+
+// writeAtomic writes data to a temp file in the same directory and renames it
+// over path, so a failed write never leaves a truncated file behind.
+func writeAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	cleanup := func() {
+		tmp.Close()
+		os.Remove(tmpName)
+	}
+
+	if err := tmp.Chmod(0o600); err != nil {
+		cleanup()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		cleanup()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
 	return nil
 }
 

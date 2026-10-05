@@ -72,9 +72,24 @@ Interactive setup that prompts for:
 - Username (your email for Atlassian Cloud)
 - API token (generate at https://id.atlassian.com/manage-profile/security/api-tokens)
 
+The connection, credentials and project are tested before anything is saved. If a check fails, the failing value is asked again; after three failures `configure` exits with status 1 and your existing setup is left untouched.
+
+Saving only changes the keys whose values changed, so comments and formatting in `~/.jiractl.toml` are kept. The file is written atomically with `0600` permissions.
+
 ### `jiractl create`
 
-Interactively create a new Jira issue. Prompts for issue type, summary, and description.
+Interactively create a new Jira issue. Prompts for summary, description and epic. The issue type is asked only when `issue_defaults.issue_type` is not set; the epic only when `issue_defaults.epic_link` is not set.
+
+The confirm step defaults to yes (`[Y/n]`). If you answer no, or Jira rejects the issue, what you typed is saved as a draft (`~/.local/state/jiractl/draft.json`) and the next `jiractl create` offers to resume it.
+
+### `jiractl inspect <issue-url-or-key>`
+
+Print an issue's full JSON, including every `customfield_XXXXX` with its name. Useful for finding the IDs and value formats for `[issue_defaults.custom_fields]`:
+
+```bash
+jiractl inspect PROJ-123
+jiractl inspect https://yourcompany.atlassian.net/browse/PROJ-123
+```
 
 ### `jiractl query [name]`
 
@@ -102,7 +117,7 @@ server = "https://yourcompany.atlassian.net"
 project = "PROJ"
 
 [issue_defaults]
-assignee = "john.doe"
+assignee = "john.doe@example.com"   # email, name or account ID; resolved to an account ID
 component = "Backend"
 issue_type = "Task"
 labels = ["team-alpha"]
@@ -185,8 +200,20 @@ limit = 30
 ## Flags
 
 - `--debug` - Enable debug output
-- `-v, --version` - Show version information
+- `-v, --version` - Show version information (works on every command)
 - `-h, --help` - Show help
+
+Unknown keys in `~/.jiractl.toml` are reported as warnings on stderr, so a typo such as `asignee` doesn't go unnoticed.
+
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Success |
+| 1 | Error (the message is printed once on stderr) |
+| 130 | Cancelled with Ctrl+C, Ctrl+D or Esc |
+
+Warnings, progress messages and prompts go to stderr, so stdout can be piped.
 
 ## Building
 

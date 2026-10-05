@@ -2,11 +2,12 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/eugenetaranov/jiractl/internal/config"
 	"github.com/eugenetaranov/jiractl/internal/jira"
-	fuzzyfinder "github.com/ktr0731/go-fuzzyfinder"
+	"github.com/eugenetaranov/jiractl/internal/textutil"
 	"github.com/spf13/cobra"
 )
 
@@ -33,8 +34,6 @@ func loadConfig() (*config.Config, error) {
 }
 
 func runCreate(cmd *cobra.Command, args []string) error {
-	cmd.SilenceUsage = true
-
 	cfg, err := loadConfig()
 	if err != nil {
 		return err
@@ -45,142 +44,153 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Determine issue type
-	var issueType string
-	if cfg.IssueDefaults.IssueType != "" {
-		issueType = cfg.IssueDefaults.IssueType
-	} else {
-		// Get available issue types
-		issueTypes, err := client.GetIssueTypes(cfg.Project)
+	draft := &issueDraft{Project: cfg.Project}
+	resumed := false
+	if saved := loadDraft(); saved != nil && saved.Project == cfg.Project {
+		label := fmt.Sprintf("Resume draft %q from %s?", textutil.Truncate(saved.Summary, 40), saved.SavedAt.Format("Jan 2 15:04"))
+		resume, err := promptConfirm(label, true)
 		if err != nil {
-			return fmt.Errorf("failed to get issue types: %w", err)
-		}
-
-		// Build issue type list
-		typeNames := make([]string, len(issueTypes))
-		for i, it := range issueTypes {
-			typeNames[i] = it.Name
-		}
-
-		// Prompt for issue type
-		idx, err := fzfSelect(typeNames, "Select issue type")
-		if err != nil {
-			if err == fuzzyfinder.ErrAbort {
-				fmt.Println("\nCancelled.")
-				return nil
-			}
 			return err
 		}
-		issueType = typeNames[idx]
-	}
-
-	// Prompt for summary
-	summary, err := promptText("Summary", true)
-	if err != nil {
-		if err == ErrPromptCancelled {
-			fmt.Println("\nCancelled.")
-			return nil
+		if resume {
+			draft, resumed = saved, true
+		} else {
+			deleteDraft()
 		}
-		return err
 	}
 
-	// Prompt for description
-	description, err := promptMultilineText("Description (optional)")
-	if err != nil {
-		if err == ErrPromptCancelled {
-			fmt.Println("\nCancelled.")
-			return nil
+	if !resumed {
+		if err := promptNewIssue(cfg, client, draft); err != nil {
+			return err
 		}
-		return err
 	}
 
-	// Determine epic link
-	var epicLink, epicSummary string
-	if cfg.IssueDefaults.EpicLink != "" {
-		epicLink = cfg.IssueDefaults.EpicLink
-		// Fetch epic summary for display
-		if epic, err := client.GetIssue(epicLink); err == nil && epic.Fields != nil {
+	epicSummary := ""
+	if draft.EpicLink != "" {
+		if epic, err := client.GetIssue(draft.EpicLink); err == nil && epic.Fields != nil {
 			epicSummary = epic.Fields.Summary
 		}
-	} else {
-		// Prompt for epic if not configured
-		epics, err := client.GetEpics(cfg.Project)
-		if err != nil {
-			// Non-fatal: just skip epic selection
-			fmt.Printf("Warning: could not fetch epics: %v\n", err)
-		} else if len(epics) > 0 {
-			epicItems := make([]string, len(epics)+1)
-			epicItems[0] = "(None)"
-			for i, epic := range epics {
-				summary := ""
-				if epic.Fields != nil {
-					summary = epic.Fields.Summary
-				}
-				if len(summary) > 50 {
-					summary = summary[:47] + "..."
-				}
-				epicItems[i+1] = fmt.Sprintf("%s - %s", epic.Key, summary)
-			}
-
-			idx, err := fzfSelect(epicItems, "Select epic (optional)")
-			if err != nil {
-				if err == fuzzyfinder.ErrAbort {
-					fmt.Println("\nCancelled.")
-					return nil
-				}
-				return err
-			}
-			if idx > 0 {
-				epicLink = epics[idx-1].Key
-				if epics[idx-1].Fields != nil {
-					epicSummary = epics[idx-1].Fields.Summary
-				}
-			}
-		}
 	}
 
-	// Confirm creation
-	fmt.Printf("\nCreating issue:\n")
-	fmt.Printf("  Project:     %s\n", cfg.Project)
-	fmt.Printf("  Type:        %s\n", issueType)
-	fmt.Printf("  Summary:     %s\n", summary)
-	if description != "" {
-		lines := strings.Split(description, "\n")
-		if len(lines) == 1 && len(description) <= 50 {
-			fmt.Printf("  Description: %s\n", description)
-		} else {
-			fmt.Printf("  Description: (%d lines)\n", len(lines))
-		}
-	}
-	if epicLink != "" {
-		if epicSummary != "" {
-			fmt.Printf("  Epic:        %s - %s\n", epicLink, epicSummary)
-		} else {
-			fmt.Printf("  Epic:        %s\n", epicLink)
-		}
-	}
-	for k, v := range cfg.IssueDefaults.CustomFields {
-		fmt.Printf("  %s: %s\n", k, v)
-	}
+	printReview(cfg, draft, epicSummary)
 
-	confirmed, err := promptConfirm("Create this issue?")
+	confirmed, err := promptConfirm("Create this issue?", true)
 	if err != nil {
+		keepDraft(draft)
 		return err
 	}
 	if !confirmed {
-		fmt.Println("Issue creation cancelled.")
-		return nil
+		keepDraft(draft)
+		return ErrCancelled
 	}
 
-	// Create the issue
-	opts := &jira.CreateIssueOptions{EpicLink: epicLink}
-	issue, err := client.CreateIssue(cfg.Project, issueType, summary, description, opts)
+	opts := &jira.CreateIssueOptions{EpicLink: draft.EpicLink}
+	issue, err := client.CreateIssue(cfg.Project, draft.IssueType, draft.Summary, draft.Description, opts)
 	if err != nil {
+		keepDraft(draft)
 		return fmt.Errorf("failed to create issue: %w", err)
 	}
+	deleteDraft()
 
 	fmt.Printf("\nCreated issue: %s\n", issue.Key)
 	fmt.Printf("%s/browse/%s\n", cfg.Server, issue.Key)
 
 	return nil
+}
+
+// promptNewIssue asks for type, summary, description and epic.
+func promptNewIssue(cfg *config.Config, client *jira.Client, draft *issueDraft) error {
+	if cfg.IssueDefaults.IssueType != "" {
+		draft.IssueType = cfg.IssueDefaults.IssueType
+	} else {
+		issueTypes, err := client.GetIssueTypes(cfg.Project)
+		if err != nil {
+			return fmt.Errorf("failed to get issue types: %w", err)
+		}
+		typeNames := make([]string, len(issueTypes))
+		for i, it := range issueTypes {
+			typeNames[i] = it.Name
+		}
+		idx, err := fzfSelect(typeNames, "Select issue type")
+		if err != nil {
+			return err
+		}
+		draft.IssueType = typeNames[idx]
+	}
+
+	summary, err := promptText("Summary", true)
+	if err != nil {
+		return err
+	}
+	draft.Summary = summary
+
+	description, err := promptMultilineText("Description (optional)")
+	if err != nil {
+		return err
+	}
+	draft.Description = description
+
+	if cfg.IssueDefaults.EpicLink != "" {
+		draft.EpicLink = cfg.IssueDefaults.EpicLink
+		return nil
+	}
+
+	epics, err := client.GetEpics(cfg.Project)
+	if err != nil {
+		// Non-fatal: just skip epic selection
+		fmt.Fprintf(os.Stderr, "Warning: could not fetch epics: %v\n", err)
+		return nil
+	}
+	if len(epics) == 0 {
+		return nil
+	}
+	epicItems := make([]string, len(epics)+1)
+	epicItems[0] = "(None)"
+	for i, epic := range epics {
+		epicItems[i+1] = epicLabel(epic)
+	}
+	idx, err := fzfSelect(epicItems, "Select epic (optional)")
+	if err != nil {
+		return err
+	}
+	if idx > 0 {
+		draft.EpicLink = epics[idx-1].Key
+	}
+	return nil
+}
+
+func printReview(cfg *config.Config, draft *issueDraft, epicSummary string) {
+	w := os.Stderr
+	fmt.Fprintf(w, "\nCreating issue:\n")
+	fmt.Fprintf(w, "  Project:     %s\n", cfg.Project)
+	fmt.Fprintf(w, "  Type:        %s\n", draft.IssueType)
+	fmt.Fprintf(w, "  Summary:     %s\n", draft.Summary)
+	if draft.Description != "" {
+		lines := strings.Split(draft.Description, "\n")
+		if len(lines) == 1 && textutil.Width(draft.Description) <= 50 {
+			fmt.Fprintf(w, "  Description: %s\n", draft.Description)
+		} else {
+			fmt.Fprintf(w, "  Description: (%d lines)\n", len(lines))
+		}
+	}
+	if draft.EpicLink != "" {
+		if epicSummary != "" {
+			fmt.Fprintf(w, "  Epic:        %s - %s\n", draft.EpicLink, epicSummary)
+		} else {
+			fmt.Fprintf(w, "  Epic:        %s\n", draft.EpicLink)
+		}
+	}
+	d := cfg.IssueDefaults
+	if d.Assignee != "" {
+		fmt.Fprintf(w, "  Assignee:    %s\n", d.Assignee)
+	}
+	if d.Component != "" {
+		fmt.Fprintf(w, "  Component:   %s\n", d.Component)
+	}
+	if len(d.Labels) > 0 {
+		fmt.Fprintf(w, "  Labels:      %s\n", strings.Join(d.Labels, ", "))
+	}
+	for k, v := range d.CustomFields {
+		fmt.Fprintf(w, "  %s: %s\n", k, v)
+	}
 }

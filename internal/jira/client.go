@@ -6,7 +6,9 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
+	"sync"
 
 	jira "github.com/andygrunwald/go-jira"
 	"github.com/eugenetaranov/jiractl/internal/config"
@@ -17,6 +19,9 @@ import (
 type Client struct {
 	*jira.Client
 	config *config.Config
+
+	accountMu sync.Mutex
+	accountID map[string]string // assignee value -> resolved account ID
 }
 
 // SearchResult represents the response from the v3 search API
@@ -40,6 +45,12 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		return nil, fmt.Errorf("server URL not configured, run 'jiractl configure' first")
 	}
 
+	return NewClientWith(cfg, username, token)
+}
+
+// NewClientWith creates a client from explicit credentials, so values can be
+// tested before anything is written to the keyring or config file.
+func NewClientWith(cfg *config.Config, username, token string) (*Client, error) {
 	tp := jira.BasicAuthTransport{
 		Username: strings.TrimSpace(username),
 		Password: strings.TrimSpace(token),
@@ -47,12 +58,13 @@ func NewClient(cfg *config.Config) (*Client, error) {
 
 	client, err := jira.NewClient(tp.Client(), cfg.Server)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Jira client: %w", err)
+		return nil, fmt.Errorf("invalid server URL: %w", err)
 	}
 
 	return &Client{
-		Client: client,
-		config: cfg,
+		Client:    client,
+		config:    cfg,
+		accountID: map[string]string{},
 	}, nil
 }
 
@@ -92,8 +104,18 @@ func (c *Client) CreateIssue(project, issueType, summary, description string, op
 	}
 
 	// Apply defaults from config
-	if c.config.IssueDefaults.Assignee != "" && issue.Fields.Assignee == nil {
-		issue.Fields.Assignee = &jira.User{Name: c.config.IssueDefaults.Assignee}
+	var assignee map[string]string
+	if c.config.IssueDefaults.Assignee != "" {
+		accountID, err := c.ResolveAccountID(c.config.IssueDefaults.Assignee)
+		if err != nil {
+			return nil, err
+		}
+		// Sent as a raw field: go-jira's User type always serializes an
+		// empty Password, which has no place in a create request.
+		assignee = map[string]string{"accountId": accountID}
+	}
+	if c.config.IssueDefaults.Component != "" && len(issue.Fields.Components) == 0 {
+		issue.Fields.Components = []*jira.Component{{Name: c.config.IssueDefaults.Component}}
 	}
 	if len(c.config.IssueDefaults.Labels) > 0 && len(issue.Fields.Labels) == 0 {
 		issue.Fields.Labels = c.config.IssueDefaults.Labels
@@ -114,23 +136,17 @@ func (c *Client) CreateIssue(project, issueType, summary, description string, op
 		issue.Fields.Parent = &jira.Parent{Key: epicLink}
 	}
 
-	if len(c.config.IssueDefaults.CustomFields) > 0 {
-		issue.Fields.Unknowns = tcontainer.MarshalMap{}
-		for k, raw := range c.config.IssueDefaults.CustomFields {
-			issue.Fields.Unknowns[k] = parseCustomFieldValue(raw)
-		}
+	issue.Fields.Unknowns = tcontainer.MarshalMap{}
+	for k, raw := range c.config.IssueDefaults.CustomFields {
+		issue.Fields.Unknowns[k] = parseCustomFieldValue(raw)
+	}
+	if assignee != nil {
+		issue.Fields.Unknowns["assignee"] = assignee
 	}
 
 	created, resp, err := c.Issue.Create(issue)
 	if err != nil {
-		if resp != nil && resp.Body != nil {
-			body, _ := io.ReadAll(resp.Body)
-			if len(body) > 0 {
-				return nil, fmt.Errorf("failed to create issue: %s", string(body))
-			}
-			return nil, fmt.Errorf("failed to create issue (status %d): %w", resp.StatusCode, err)
-		}
-		return nil, fmt.Errorf("failed to create issue: %w", err)
+		return nil, wrapError(resp, err)
 	}
 
 	return created, nil
@@ -156,10 +172,7 @@ func (c *Client) SearchIssues(jql string, maxResults int) ([]jira.Issue, error) 
 
 	resp, err := c.Do(req, nil)
 	if err != nil {
-		if resp != nil {
-			return nil, fmt.Errorf("search failed (status %d): %w", resp.StatusCode, err)
-		}
-		return nil, fmt.Errorf("search failed: %w", err)
+		return nil, wrapError(resp, err)
 	}
 	defer resp.Body.Close()
 
@@ -175,10 +188,7 @@ func (c *Client) SearchIssues(jql string, maxResults int) ([]jira.Issue, error) 
 func (c *Client) GetIssue(key string) (*jira.Issue, error) {
 	issue, resp, err := c.Issue.Get(key, nil)
 	if err != nil {
-		if resp != nil {
-			return nil, fmt.Errorf("failed to get issue (status %d): %w", resp.StatusCode, err)
-		}
-		return nil, fmt.Errorf("failed to get issue: %w", err)
+		return nil, wrapError(resp, err)
 	}
 	return issue, nil
 }
@@ -209,11 +219,7 @@ func (c *Client) GetIssueRaw(key string, debug bool) (*RawIssue, []byte, error) 
 
 	resp, err := c.Do(req, nil)
 	if err != nil {
-		if resp != nil {
-			body, _ := io.ReadAll(resp.Body)
-			return nil, nil, fmt.Errorf("failed to get issue (status %d): %s", resp.StatusCode, string(body))
-		}
-		return nil, nil, fmt.Errorf("failed to get issue: %w", err)
+		return nil, nil, wrapError(resp, err)
 	}
 	defer resp.Body.Close()
 
@@ -239,10 +245,7 @@ func (c *Client) GetIssueRaw(key string, debug bool) (*RawIssue, []byte, error) 
 func (c *Client) GetIssueTypes(projectKey string) ([]jira.IssueType, error) {
 	project, resp, err := c.Project.Get(projectKey)
 	if err != nil {
-		if resp != nil {
-			return nil, fmt.Errorf("failed to get project (status %d): %w", resp.StatusCode, err)
-		}
-		return nil, fmt.Errorf("failed to get project: %w", err)
+		return nil, wrapError(resp, err)
 	}
 	return project.IssueTypes, nil
 }
@@ -250,17 +253,76 @@ func (c *Client) GetIssueTypes(projectKey string) ([]jira.IssueType, error) {
 // TestConnection verifies the connection to Jira works
 func (c *Client) TestConnection() error {
 	_, resp, err := c.User.GetSelf()
-	if err != nil {
-		if resp != nil {
-			return fmt.Errorf("connection test failed (status %d): %w", resp.StatusCode, err)
-		}
-		return fmt.Errorf("connection test failed: %w", err)
-	}
-	return nil
+	return wrapError(resp, err)
 }
 
 // GetEpics returns open epics in the given project
 func (c *Client) GetEpics(projectKey string) ([]jira.Issue, error) {
 	jql := fmt.Sprintf("project = %s AND issuetype = Epic AND resolution = Unresolved ORDER BY created DESC", projectKey)
 	return c.SearchIssues(jql, 100)
+}
+
+var accountIDRE = regexp.MustCompile(`^([0-9a-f]{24}|\d+:[0-9a-f-]{36})$`)
+
+// ResolveAccountID turns a configured assignee (email, name or account ID)
+// into a Jira Cloud account ID. Exactly one active user must match.
+func (c *Client) ResolveAccountID(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if accountIDRE.MatchString(value) {
+		return value, nil
+	}
+
+	c.accountMu.Lock()
+	defer c.accountMu.Unlock()
+	if id, ok := c.accountID[value]; ok {
+		return id, nil
+	}
+
+	req, err := c.NewRequest("GET", "rest/api/3/user/search?query="+url.QueryEscape(value), nil)
+	if err != nil {
+		return "", err
+	}
+	var users []jira.User
+	resp, err := c.Do(req, &users)
+	if err != nil {
+		err = wrapError(resp, err)
+		if StatusOf(err) == 403 {
+			return "", fmt.Errorf("cannot look up assignee %q (no permission to browse users); set issue_defaults.assignee to an account ID instead", value)
+		}
+		return "", fmt.Errorf("assignee lookup for %q failed: %w", value, err)
+	}
+
+	var active []jira.User
+	for _, u := range users {
+		if u.Active {
+			active = append(active, u)
+		}
+	}
+	// Prefer an exact email or display-name match when the search is fuzzy.
+	if len(active) > 1 {
+		for _, u := range active {
+			if strings.EqualFold(u.EmailAddress, value) || strings.EqualFold(u.DisplayName, value) {
+				active = []jira.User{u}
+				break
+			}
+		}
+	}
+
+	switch len(active) {
+	case 1:
+		c.accountID[value] = active[0].AccountID
+		return active[0].AccountID, nil
+	case 0:
+		return "", fmt.Errorf("issue_defaults.assignee %q matches no active Jira user", value)
+	default:
+		names := make([]string, 0, len(active))
+		for _, u := range active {
+			label := u.DisplayName
+			if u.EmailAddress != "" {
+				label += " <" + u.EmailAddress + ">"
+			}
+			names = append(names, label)
+		}
+		return "", fmt.Errorf("issue_defaults.assignee %q matches several users: %s", value, strings.Join(names, ", "))
+	}
 }

@@ -42,8 +42,6 @@ func parseIssueKey(input string) (string, error) {
 }
 
 func runInspect(cmd *cobra.Command, args []string) error {
-	cmd.SilenceUsage = true
-
 	key, err := parseIssueKey(args[0])
 	if err != nil {
 		return err

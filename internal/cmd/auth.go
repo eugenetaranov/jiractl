@@ -2,14 +2,12 @@ package cmd
 
 import (
 	"fmt"
-	"strings"
-	"syscall"
+	"os"
 
 	"github.com/eugenetaranov/jiractl/internal/config"
 	"github.com/eugenetaranov/jiractl/internal/jira"
 	"github.com/eugenetaranov/jiractl/internal/keyring"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 var authCmd = &cobra.Command{
@@ -51,8 +49,6 @@ func init() {
 }
 
 func runAuthList(cmd *cobra.Command, args []string) error {
-	cmd.SilenceUsage = true
-
 	username, err := keyring.GetUsername()
 	if err != nil {
 		return fmt.Errorf("failed to get username: %w", err)
@@ -76,12 +72,7 @@ func runAuthList(cmd *cobra.Command, args []string) error {
 	}
 
 	if token != "" {
-		// Show masked token
-		masked := token[:4] + "..." + token[len(token)-4:]
-		if len(token) < 12 {
-			masked = "****"
-		}
-		fmt.Printf("  Token:    %s\n", masked)
+		fmt.Printf("  Token:    set (%d chars)\n", len(token))
 	} else {
 		fmt.Println("  Token:    (not set)")
 	}
@@ -90,20 +81,17 @@ func runAuthList(cmd *cobra.Command, args []string) error {
 }
 
 func runAuthDelete(cmd *cobra.Command, args []string) error {
-	cmd.SilenceUsage = true
-
 	if !keyring.HasCredentials() {
 		fmt.Println("No credentials stored.")
 		return nil
 	}
 
-	confirmed, err := promptConfirm("Delete stored credentials?")
+	confirmed, err := promptConfirm("Delete stored credentials?", false)
 	if err != nil {
 		return err
 	}
 	if !confirmed {
-		fmt.Println("Cancelled.")
-		return nil
+		return ErrCancelled
 	}
 
 	if err := keyring.ClearCredentials(); err != nil {
@@ -115,28 +103,18 @@ func runAuthDelete(cmd *cobra.Command, args []string) error {
 }
 
 func runAuthCreate(cmd *cobra.Command, args []string) error {
-	cmd.SilenceUsage = true
-
 	currentUsername, _ := keyring.GetUsername()
 
 	// Prompt for username
 	username, err := promptTextWithDefault("Username (email)", currentUsername, true)
 	if err != nil {
-		if err == ErrPromptCancelled {
-			fmt.Println("\nCancelled.")
-			return nil
-		}
 		return err
 	}
 
-	// Prompt for API token using term.ReadPassword (handles paste correctly)
-	fmt.Print("API Token: ")
-	tokenBytes, err := term.ReadPassword(int(syscall.Stdin))
-	fmt.Println()
+	token, err := readSecret("API Token: ")
 	if err != nil {
-		return fmt.Errorf("failed to read token: %w", err)
+		return err
 	}
-	token := strings.TrimSpace(string(tokenBytes))
 	if token == "" {
 		return fmt.Errorf("API token is required")
 	}
@@ -154,8 +132,6 @@ func runAuthCreate(cmd *cobra.Command, args []string) error {
 }
 
 func runAuthTest(cmd *cobra.Command, args []string) error {
-	cmd.SilenceUsage = true
-
 	if !keyring.HasCredentials() {
 		return fmt.Errorf("no credentials stored, run 'jiractl auth create' first")
 	}
@@ -171,11 +147,10 @@ func runAuthTest(cmd *cobra.Command, args []string) error {
 
 	username, token, _ := keyring.GetCredentials()
 
-	fmt.Printf("Testing connection to %s...\n", cfg.Server)
+	fmt.Fprintf(os.Stderr, "Testing connection to %s...\n", cfg.Server)
 	if debug {
-		fmt.Printf("  Username: %s\n", username)
-		fmt.Printf("  Token length: %d\n", len(token))
-		fmt.Printf("  Token prefix: %s\n", token[:min(8, len(token))])
+		fmt.Fprintf(os.Stderr, "  Username: %s\n", username)
+		fmt.Fprintf(os.Stderr, "  Token length: %d\n", len(token))
 	}
 
 	client, err := jira.NewClient(cfg)
