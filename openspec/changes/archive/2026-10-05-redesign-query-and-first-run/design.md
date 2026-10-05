@@ -11,7 +11,7 @@
 ## Decisions
 
 ### Preview pane
-Use `fuzzyfinder.WithPreviewWindow`. Preview text comes from the search results, which are extended to request `issuetype,priority,assignee,reporter,labels,description`. That way the preview needs no extra request per item. The description is truncated to the preview height and wrapped by display width (`textutil`).
+Use `fuzzyfinder.WithPreviewWindow`. Preview text comes from the search results, which are extended to request `issuetype,priority,assignee,reporter,labels,description`. Jira Cloud's v3 search returns descriptions as Atlassian Document Format; they are flattened to plain text before go-jira decodes the issues. That way the preview needs no extra request per item. The description is truncated to the preview height and wrapped by display width (`textutil`).
 
 ### Action loop
 ```
@@ -51,7 +51,7 @@ If `-o` is given, or stdout is not a TTY, skip the picker. `-o keys` prints one 
 `auth create` = step 2 with the server from config. If no server is configured, it runs step 1 first.
 
 ### Menu loop
-`runInteractiveMenu` loops until Exit or Esc. A cancel or error inside an action prints the message and returns to the menu, and does not exit.
+`runInteractiveMenu` loops until Exit or Esc. A cancel or error inside an action prints the message and returns to the menu, and does not exit. Because the picker takes over the screen, the last action's result (for example `Created OPS-99`) is shown in the menu header.
 
 ## Risks / Trade-offs
 

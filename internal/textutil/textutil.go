@@ -2,7 +2,11 @@
 // character, and padding is measured in display columns, not bytes.
 package textutil
 
-import "github.com/mattn/go-runewidth"
+import (
+	"strings"
+
+	"github.com/mattn/go-runewidth"
+)
 
 // Truncate shortens s to at most cols display columns, ending with "…" when
 // anything was cut.
@@ -22,4 +26,17 @@ func PadRight(s string, cols int) string {
 // Width returns the display width of s.
 func Width(s string) int {
 	return runewidth.StringWidth(s)
+}
+
+// Wrap breaks s into lines of at most cols display columns, keeping existing
+// line breaks.
+func Wrap(s string, cols int) []string {
+	if cols < 1 {
+		cols = 1
+	}
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		out = append(out, strings.Split(runewidth.Wrap(line, cols), "\n")...)
+	}
+	return out
 }

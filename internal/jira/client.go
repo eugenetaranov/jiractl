@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"regexp"
@@ -22,12 +23,9 @@ type Client struct {
 
 	accountMu sync.Mutex
 	accountID map[string]string // assignee value -> resolved account ID
-}
 
-// SearchResult represents the response from the v3 search API
-type SearchResult struct {
-	Issues []jira.Issue `json:"issues"`
-	Total  int          `json:"total"`
+	selfMu sync.Mutex
+	self   *jira.User
 }
 
 // NewClient creates a new Jira client using credentials from keyring and config
@@ -50,13 +48,20 @@ func NewClient(cfg *config.Config) (*Client, error) {
 
 // NewClientWith creates a client from explicit credentials, so values can be
 // tested before anything is written to the keyring or config file.
+//
+// With empty credentials the client is anonymous, which is enough for
+// GetServerInfo.
 func NewClientWith(cfg *config.Config, username, token string) (*Client, error) {
-	tp := jira.BasicAuthTransport{
-		Username: strings.TrimSpace(username),
-		Password: strings.TrimSpace(token),
+	httpClient := http.DefaultClient
+	if username != "" || token != "" {
+		tp := jira.BasicAuthTransport{
+			Username: strings.TrimSpace(username),
+			Password: strings.TrimSpace(token),
+		}
+		httpClient = tp.Client()
 	}
 
-	client, err := jira.NewClient(tp.Client(), cfg.Server)
+	client, err := jira.NewClient(httpClient, cfg.Server)
 	if err != nil {
 		return nil, fmt.Errorf("invalid server URL: %w", err)
 	}
@@ -155,6 +160,10 @@ func (c *Client) GetFields() ([]Field, error) {
 	return fields, nil
 }
 
+// searchFields are requested for every search, enough to render the results
+// list and the preview pane without fetching each issue.
+const searchFields = "key,summary,status,assignee,reporter,priority,issuetype,labels,description,created,updated,resolution"
+
 // SearchIssues searches for issues using JQL via the v3 API
 func (c *Client) SearchIssues(jql string, maxResults int) ([]jira.Issue, error) {
 	if maxResults <= 0 {
@@ -163,9 +172,10 @@ func (c *Client) SearchIssues(jql string, maxResults int) ([]jira.Issue, error) 
 
 	// Use the v3 search/jql endpoint
 	apiEndpoint := fmt.Sprintf(
-		"rest/api/3/search/jql?jql=%s&maxResults=%d&fields=key,summary,status,assignee,priority,created,updated,resolution,issuetype",
+		"rest/api/3/search/jql?jql=%s&maxResults=%d&fields=%s",
 		url.QueryEscape(jql),
 		maxResults,
+		searchFields,
 	)
 
 	req, err := c.NewRequest("GET", apiEndpoint, nil)
@@ -179,12 +189,24 @@ func (c *Client) SearchIssues(jql string, maxResults int) ([]jira.Issue, error) 
 	}
 	defer resp.Body.Close()
 
-	var result SearchResult
+	var result struct {
+		Issues []json.RawMessage `json:"issues"`
+	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
-
-	return result.Issues, nil
+	// v3 returns descriptions as ADF documents; go-jira expects a string.
+	raw, err := flattenADFDescriptions(result.Issues)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	issues := make([]jira.Issue, len(raw))
+	for i, r := range raw {
+		if err := json.Unmarshal(r, &issues[i]); err != nil {
+			return nil, fmt.Errorf("failed to decode issue: %w", err)
+		}
+	}
+	return issues, nil
 }
 
 // GetIssue retrieves a single issue by key

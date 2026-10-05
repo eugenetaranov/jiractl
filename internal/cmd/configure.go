@@ -17,8 +17,9 @@ import (
 var configureCmd = &cobra.Command{
 	Use:   "configure",
 	Short: "Configure jiractl settings",
-	Long: `Interactive setup for jiractl. Prompts for server URL, project key, username, and API token.
-Nothing is saved until the connection, credentials and project have been verified.`,
+	Long: `Interactive setup for jiractl: server URL, credentials, project, and default
+issue type and epic. Each value is checked as soon as it is entered, and
+nothing is saved until every step has passed.`,
 	RunE: runConfigure,
 }
 
@@ -28,104 +29,30 @@ func init() {
 
 const maxConfigureAttempts = 3
 
-// configureField names the value that failed validation and must be re-asked.
-type configureField string
-
-const (
-	fieldServer  configureField = "server"
-	fieldToken   configureField = "credentials"
-	fieldProject configureField = "project"
-)
-
-type validationError struct {
-	field configureField
-	err   error
-}
-
-func (v *validationError) Error() string { return v.err.Error() }
-
 func runConfigure(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
-	// Work on a copy; cfg stays as the last saved state until validation passes.
+	// Work on a copy; nothing is written until every step passed.
 	updated := *cfg
 
-	currentUsername, _ := keyring.GetUsername()
-	existingToken, _ := keyring.GetToken()
-
-	server, err := promptServer(cfg.Server)
+	server, err := askServer(cfg.Server)
 	if err != nil {
 		return err
 	}
-	project, err := promptTextWithDefault("Default Project Key", cfg.Project, true)
+	updated.Server = server
+
+	creds, err := promptCredentials(&updated)
 	if err != nil {
 		return err
 	}
-	username, err := promptTextWithDefault("Username (email)", currentUsername, true)
+
+	project, issueTypes, err := askProject(creds.client, &updated, cfg.Project)
 	if err != nil {
 		return err
 	}
-	tokenLabel := "API Token: "
-	if existingToken != "" {
-		tokenLabel = "API Token (leave empty to keep existing): "
-	}
-	token, err := readSecret(tokenLabel)
-	if err != nil {
-		return err
-	}
-	if token == "" && existingToken == "" {
-		token, err = promptRequiredSecret("API Token: ")
-		if err != nil {
-			return err
-		}
-	}
-
-	attempts := map[configureField]int{}
-	var client *jira.Client
-	var issueTypes []jiralib.IssueType
-	for {
-		updated.Server = server
-		updated.Project = strings.ToUpper(project)
-		effectiveToken := token
-		if effectiveToken == "" {
-			effectiveToken = existingToken
-		}
-
-		fmt.Fprint(os.Stderr, "\nTesting connection... ")
-		client, issueTypes, err = validateSetup(&updated, username, effectiveToken)
-		if err == nil {
-			fmt.Fprintln(os.Stderr, "success!")
-			break
-		}
-		fmt.Fprintln(os.Stderr, "failed")
-
-		var verr *validationError
-		if !errors.As(err, &verr) {
-			return err
-		}
-		fmt.Fprintf(os.Stderr, "  %v\n", verr.err)
-		attempts[verr.field]++
-		if attempts[verr.field] >= maxConfigureAttempts {
-			return fmt.Errorf("%s check failed %d times, nothing was saved: %w", verr.field, maxConfigureAttempts, verr.err)
-		}
-
-		switch verr.field {
-		case fieldServer:
-			server, err = promptServer(server)
-		case fieldToken:
-			username, err = promptTextWithDefault("Username (email)", username, true)
-			if err == nil {
-				token, err = promptRequiredSecret("API Token: ")
-			}
-		case fieldProject:
-			project, err = promptTextWithDefault("Default Project Key", "", true)
-		}
-		if err != nil {
-			return err
-		}
-	}
+	updated.Project = project
 
 	// Optional defaults. Esc keeps the previous value.
 	if len(issueTypes) > 0 {
@@ -142,7 +69,7 @@ func runConfigure(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	epics, err := client.GetEpics(updated.Project)
+	epics, err := creds.client.GetEpics(updated.Project)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not fetch epics: %v\n", err)
 	} else if len(epics) > 0 {
@@ -162,14 +89,15 @@ func runConfigure(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Everything checked out: persist once.
-	if err := keyring.SetUsername(username); err != nil {
-		return fmt.Errorf("failed to save username: %w", err)
+	addedQueries := false
+	if len(updated.Queries) == 0 {
+		updated.Queries = append([]config.Query(nil), config.StarterQueries...)
+		addedQueries = true
 	}
-	if token != "" {
-		if err := keyring.SetToken(token); err != nil {
-			return fmt.Errorf("failed to save token: %w", err)
-		}
+
+	// Everything checked out: persist once.
+	if err := creds.save(); err != nil {
+		return err
 	}
 	if err := updated.Save(); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
@@ -180,59 +108,181 @@ func runConfigure(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Project:            %s\n", updated.Project)
 	fmt.Printf("  Default issue type: %s\n", orNone(updated.IssueDefaults.IssueType))
 	fmt.Printf("  Default epic:       %s\n", orNone(updated.IssueDefaults.EpicLink))
-	if token != "" {
+	if creds.token != "" {
 		fmt.Println("  Credentials:        stored in system keyring")
+	}
+	if addedQueries {
+		fmt.Printf("  Queries:            added %s (try 'jiractl query mine')\n", strings.Join(updated.QueryNames(), ", "))
+	}
+	menuStatus = "Configuration saved"
+	return nil
+}
+
+// normalizeServer adds https:// when no scheme is given and drops trailing
+// slashes.
+func normalizeServer(s string) string {
+	s = strings.TrimRight(strings.TrimSpace(s), "/")
+	if s != "" && !strings.HasPrefix(s, "http://") && !strings.HasPrefix(s, "https://") {
+		s = "https://" + s
+	}
+	return s
+}
+
+// askServer asks for the server URL and checks it is a reachable Jira.
+func askServer(current string) (string, error) {
+	var lastErr error
+	for attempt := 0; attempt < maxConfigureAttempts; attempt++ {
+		input, err := promptTextWithDefault("Jira Server URL", current, true)
+		if err != nil {
+			return "", err
+		}
+		server := normalizeServer(input)
+
+		client, err := jira.NewClientWith(&config.Config{Server: server}, "", "")
+		if err == nil {
+			var info *jira.ServerInfo
+			if info, err = client.GetServerInfo(); err == nil {
+				fmt.Fprintf(os.Stderr, "  Found %s %s\n", orDefault(info.DeploymentType, "Jira"), info.Version)
+				return server, nil
+			}
+		}
+		lastErr = fmt.Errorf("cannot reach Jira at %s: %w", server, err)
+		fmt.Fprintf(os.Stderr, "  %v\n", lastErr)
+		current = server
+	}
+	return "", fmt.Errorf("server check failed %d times, nothing was saved: %w", maxConfigureAttempts, lastErr)
+}
+
+// credentials are checked username/token values, saved only on request.
+type credentials struct {
+	username string
+	token    string // empty when the stored token is kept
+	client   *jira.Client
+}
+
+func (c *credentials) save() error {
+	if err := keyring.SetUsername(c.username); err != nil {
+		return fmt.Errorf("failed to save username: %w", err)
+	}
+	if c.token != "" {
+		if err := keyring.SetToken(c.token); err != nil {
+			return fmt.Errorf("failed to save token: %w", err)
+		}
 	}
 	return nil
 }
 
-// validateSetup checks server, credentials and project using in-memory values.
-func validateSetup(cfg *config.Config, username, token string) (*jira.Client, []jiralib.IssueType, error) {
-	client, err := jira.NewClientWith(cfg, username, token)
-	if err != nil {
-		return nil, nil, &validationError{fieldServer, err}
-	}
+// promptCredentials asks for username and API token and checks them against
+// the server right away. It is shared by configure and auth create.
+func promptCredentials(cfg *config.Config) (*credentials, error) {
+	currentUsername, _ := keyring.GetUsername()
+	existingToken, _ := keyring.GetToken()
 
-	if err := client.TestConnection(); err != nil {
+	var lastErr error
+	for attempt := 0; attempt < maxConfigureAttempts; attempt++ {
+		username, err := promptTextWithDefault("Username (email)", currentUsername, true)
+		if err != nil {
+			return nil, err
+		}
+
+		label := "API Token: "
+		if existingToken != "" && attempt == 0 {
+			label = "API Token (leave empty to keep existing): "
+		}
+		token, err := readSecret(label)
+		if err != nil {
+			return nil, err
+		}
+		effective := token
+		if effective == "" {
+			effective = existingToken
+		}
+		if effective == "" {
+			fmt.Fprintln(os.Stderr, "  API token is required (create one at https://id.atlassian.com/manage-profile/security/api-tokens)")
+			continue
+		}
+
+		client, err := jira.NewClientWith(cfg, username, effective)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Fprint(os.Stderr, "  Checking credentials... ")
+		err = client.TestConnection()
+		if err == nil {
+			fmt.Fprintln(os.Stderr, "ok")
+			return &credentials{username: username, token: token, client: client}, nil
+		}
+		fmt.Fprintln(os.Stderr, "failed")
 		switch jira.StatusOf(err) {
 		case 401, 403:
-			return nil, nil, &validationError{fieldToken, fmt.Errorf("credentials rejected: %w", err)}
+			lastErr = fmt.Errorf("credentials rejected: %w", err)
+			fmt.Fprintf(os.Stderr, "  %v\n", lastErr)
+			currentUsername = username
+			existingToken = "" // a rejected token can't be kept
 		default:
-			return nil, nil, &validationError{fieldServer, fmt.Errorf("cannot reach Jira at %s: %w", cfg.Server, err)}
+			return nil, fmt.Errorf("cannot reach Jira at %s: %w", cfg.Server, err)
 		}
 	}
+	return nil, fmt.Errorf("credentials check failed %d times, nothing was saved: %w", maxConfigureAttempts, lastErr)
+}
 
-	issueTypes, err := client.GetIssueTypes(cfg.Project)
+// askProject lets the user pick a project from the ones they can see, with
+// the current one listed first. Typing filters by key or name.
+func askProject(client *jira.Client, cfg *config.Config, current string) (string, []jiralib.IssueType, error) {
+	projects, err := client.ListProjects()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not list projects: %v\n", err)
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < maxConfigureAttempts; attempt++ {
+		var key string
+		if len(projects) > 0 {
+			items := make([]string, 0, len(projects))
+			order := make([]jira.Project, 0, len(projects))
+			for _, p := range projects {
+				if strings.EqualFold(p.Key, current) {
+					order = append([]jira.Project{p}, order...)
+				} else {
+					order = append(order, p)
+				}
+			}
+			for _, p := range order {
+				items = append(items, fmt.Sprintf("%s - %s", p.Key, textutil.Truncate(p.Name, 60)))
+			}
+			header := "Select project"
+			if current != "" {
+				header += " (current: " + current + ")"
+			}
+			idx, err := fzfSelect(items, header)
+			if errors.Is(err, ErrCancelled) && current != "" {
+				key = current
+			} else if err != nil {
+				return "", nil, err
+			} else {
+				key = order[idx].Key
+			}
+		} else {
+			key, err = promptTextWithDefault("Default Project Key", current, true)
+			if err != nil {
+				return "", nil, err
+			}
+		}
+		key = strings.ToUpper(strings.TrimSpace(key))
+
+		issueTypes, err := client.GetIssueTypes(key)
+		if err == nil {
+			return key, issueTypes, nil
+		}
 		if jira.StatusOf(err) == 404 {
-			return nil, nil, &validationError{fieldProject, fmt.Errorf("project %s not found or not visible to you", cfg.Project)}
+			lastErr = fmt.Errorf("project %s not found or not visible to you", key)
+		} else {
+			lastErr = fmt.Errorf("cannot load project %s: %w", key, err)
 		}
-		return nil, nil, &validationError{fieldProject, fmt.Errorf("cannot load project %s: %w", cfg.Project, err)}
+		fmt.Fprintf(os.Stderr, "  %v\n", lastErr)
+		current = ""
 	}
-	return client, issueTypes, nil
-}
-
-func promptServer(current string) (string, error) {
-	for {
-		server, err := promptTextWithDefault("Jira Server URL", current, true)
-		if err != nil {
-			return "", err
-		}
-		if strings.HasPrefix(server, "http://") || strings.HasPrefix(server, "https://") {
-			return strings.TrimRight(server, "/"), nil
-		}
-		fmt.Fprintln(os.Stderr, "Server URL must start with http:// or https://")
-	}
-}
-
-func promptRequiredSecret(label string) (string, error) {
-	for {
-		token, err := readSecret(label)
-		if err != nil || token != "" {
-			return token, err
-		}
-		fmt.Fprintln(os.Stderr, "This field is required")
-	}
+	return "", nil, fmt.Errorf("project check failed %d times, nothing was saved: %w", maxConfigureAttempts, lastErr)
 }
 
 func epicLabel(epic jiralib.Issue) string {
@@ -244,8 +294,12 @@ func epicLabel(epic jiralib.Issue) string {
 }
 
 func orNone(s string) string {
+	return orDefault(s, "(none)")
+}
+
+func orDefault(s, def string) string {
 	if s == "" {
-		return "(none)"
+		return def
 	}
 	return s
 }

@@ -62,17 +62,20 @@ jiractl query "My Open Issues"  # Run a specific query
 
 ### `jiractl`
 
-Launches an interactive menu with options to create issues, run queries, or configure settings.
+Launches an interactive menu with options to create issues, run queries, or configure settings. After each action you're back in the menu (the result of the last action is shown in its header); Esc or Exit leaves.
+
+Before setup, any interactive command offers to run `jiractl configure` first and then continues with what you asked for.
 
 ### `jiractl configure`
 
-Interactive setup that prompts for:
-- Jira server URL (e.g., `https://yourcompany.atlassian.net`)
-- Default project key (e.g., `PROJ`)
-- Username (your email for Atlassian Cloud)
-- API token (generate at https://id.atlassian.com/manage-profile/security/api-tokens)
+Interactive setup. Each step is checked as soon as you enter it:
 
-The connection, credentials and project are tested before anything is saved. If a check fails, the failing value is asked again; after three failures `configure` exits with status 1 and your existing setup is left untouched.
+1. **Server URL**: `https://` is added if you leave it out, and the server must answer as Jira.
+2. **Username and API token** (generate one at https://id.atlassian.com/manage-profile/security/api-tokens): checked against Jira right away; a rejected token is asked again.
+3. **Project**: picked from the projects you can see (type to filter by key or name).
+4. **Default issue type and epic**: optional; Esc keeps the current value.
+
+Nothing is saved until every step has passed. After three failures on a step, `configure` exits with status 1 and your existing setup is left untouched. On first setup, three starter queries are added: `mine`, `recent` and `unassigned`.
 
 Saving only changes the keys whose values changed, so comments and formatting in `~/.jiractl.toml` are kept. The file is written atomically with `0600` permissions.
 
@@ -126,7 +129,27 @@ jiractl inspect https://yourcompany.atlassian.net/browse/PROJ-123
 
 ### `jiractl query [name]`
 
-Run a saved JQL query. Without a name, shows a menu of available queries.
+Run a saved JQL query. Without a name, shows a menu of available queries. Names match exactly, case-insensitively, or by unique prefix (`jiractl query rec` runs `recent`); an unknown name lists the available ones.
+
+Results open in a picker with the highlighted issue's details in a preview pane. Enter opens an actions menu:
+
+| Action | What it does |
+| --- | --- |
+| Open in browser | Opens the issue page |
+| Copy key | Copies the key to the clipboard (or prints it when no clipboard is available) |
+| Transition | Picks one of the issue's transitions |
+| Assign to me | Assigns the issue to you |
+| Comment | Adds a comment (same input as descriptions) |
+| Back | Returns to the results |
+
+After each action you're back in the results; Esc leaves.
+
+```bash
+jiractl query --jql 'project = ${project} AND labels = urgent'   # one-off JQL
+jiractl query mine -o keys      # one key per line
+jiractl query mine -o json      # [{"key", "summary", "status", "assignee"}, ...]
+jiractl query mine | grep Bug   # piped: plain table, no picker
+```
 
 ### `jiractl auth`
 
@@ -134,7 +157,7 @@ Manage authentication credentials:
 
 ```bash
 jiractl auth list    # Show stored credentials
-jiractl auth create  # Create/update credentials
+jiractl auth create  # Create/update credentials (checked against Jira before saving)
 jiractl auth delete  # Remove credentials
 jiractl auth test    # Test connection to Jira
 ```

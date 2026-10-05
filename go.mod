@@ -5,6 +5,7 @@ go 1.24.0
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/andygrunwald/go-jira v1.16.0
+	github.com/atotto/clipboard v0.1.4
 	github.com/chzyer/readline v1.5.1
 	github.com/ktr0731/go-fuzzyfinder v0.9.0
 	github.com/mattn/go-runewidth v0.0.16

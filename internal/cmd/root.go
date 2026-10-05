@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/eugenetaranov/jiractl/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -47,54 +48,96 @@ func versionString() string {
 	return fmt.Sprintf("jiractl %s (commit: %s, built: %s)", Version, Commit, Date)
 }
 
-func runInteractiveMenu(cmd *cobra.Command, args []string) error {
-	menuItems := []string{
-		"Create new issue",
-		"Run query",
-		"Configure",
-		"Exit",
+// ErrNotConfigured is returned when there is no server or project and setup
+// can't be offered (no terminal) or was declined.
+var ErrNotConfigured = errors.New("not configured: run 'jiractl configure'")
+
+// menuStatus is a one-line result of the last menu action (e.g. the created
+// key), shown in the menu header because the picker hides earlier output.
+var menuStatus string
+
+// loadConfig returns the config, offering to run setup when it is missing.
+func loadConfig() (*config.Config, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
+	if cfg.Server != "" && cfg.Project != "" {
+		return cfg, nil
+	}
+	if !isInteractive() || !stdoutIsTerminal() {
+		return nil, ErrNotConfigured
 	}
 
-	idx, err := fzfSelect(menuItems, "Select action")
+	setup, err := promptConfirm("jiractl isn't set up yet. Run setup now?", true)
 	if err != nil {
+		return nil, err
+	}
+	if !setup {
+		return nil, ErrNotConfigured
+	}
+	if err := runConfigure(configureCmd, nil); err != nil {
+		return nil, err
+	}
+	if cfg, err = config.Load(); err != nil {
+		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
+	if cfg.Server == "" || cfg.Project == "" {
+		return nil, ErrNotConfigured
+	}
+	return cfg, nil
+}
+
+var menuItems = []string{
+	"Create new issue",
+	"Run query",
+	"Configure",
+	"Exit",
+}
+
+// runInteractiveMenu shows the main menu until Exit or Esc. Errors and
+// cancels inside an action are reported and the menu comes back.
+func runInteractiveMenu(cmd *cobra.Command, args []string) error {
+	if _, err := loadConfig(); err != nil {
+		return err
+	}
+
+	for {
+		header := "Select action"
+		if menuStatus != "" {
+			header = header + "   (" + menuStatus + ")"
+		}
+		idx, err := fzfSelect(menuItems, header)
 		if errors.Is(err, ErrCancelled) {
 			return nil
 		}
-		return fmt.Errorf("prompt failed: %w", err)
+		if err != nil {
+			return fmt.Errorf("prompt failed: %w", err)
+		}
+
+		menuStatus = ""
+		var actionErr error
+		switch menuItems[idx] {
+		case "Create new issue":
+			actionErr = createCmd.RunE(createCmd, nil)
+		case "Run query":
+			actionErr = runQueryInteractive()
+		case "Configure":
+			actionErr = configureCmd.RunE(configureCmd, nil)
+		case "Exit":
+			return nil
+		}
+
+		switch {
+		case actionErr == nil:
+		case errors.Is(actionErr, ErrCancelled):
+			fmt.Fprintln(os.Stderr, "Cancelled.")
+			menuStatus = "Cancelled."
+		default:
+			fmt.Fprintln(os.Stderr, "Error:", actionErr)
+			menuStatus = "Error: " + actionErr.Error()
+		}
 	}
-
-	switch idx {
-	case 0: // Create new issue
-		return createCmd.RunE(createCmd, nil)
-	case 1: // Run query
-		return runQueryInteractive()
-	case 2: // Configure
-		return configureCmd.RunE(configureCmd, nil)
-	case 3: // Exit
-		return nil
-	}
-
-	return nil
-}
-
-func runQueryInteractive() error {
-	cfg, err := loadConfig()
-	if err != nil {
-		return err
-	}
-
-	if len(cfg.Queries) == 0 {
-		fmt.Fprintln(os.Stderr, "No queries configured. Add queries to ~/.jiractl.toml")
-		return nil
-	}
-
-	names := cfg.QueryNames()
-	idx, err := fzfSelect(names, "Select query")
-	if err != nil {
-		return err
-	}
-
-	return runQuery(names[idx])
 }
 
 func Execute() {

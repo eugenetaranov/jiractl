@@ -129,3 +129,27 @@ func TestUnauthorizedStatus(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestAnonymousClientServerInfo(t *testing.T) {
+	c := newTestClientWith(t, "", "", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			t.Error("anonymous client sent credentials")
+		}
+		io.WriteString(w, `{"version":"9.4.0","deploymentType":"Server"}`)
+	})
+	info, err := c.GetServerInfo()
+	if err != nil || info.DeploymentType != "Server" {
+		t.Fatalf("got %+v %v", info, err)
+	}
+}
+
+func newTestClientWith(t *testing.T, user, token string, h http.HandlerFunc) *Client {
+	t.Helper()
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	c, err := NewClientWith(&config.Config{Server: srv.URL}, user, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}

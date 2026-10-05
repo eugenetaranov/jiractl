@@ -102,29 +102,33 @@ func runAuthDelete(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// runAuthCreate is the credentials step of configure on its own: same
+// prompts, same checks, nothing saved until Jira accepts the token.
 func runAuthCreate(cmd *cobra.Command, args []string) error {
-	currentUsername, _ := keyring.GetUsername()
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
 
-	// Prompt for username
-	username, err := promptTextWithDefault("Username (email)", currentUsername, true)
+	serverChanged := false
+	if cfg.Server == "" {
+		if cfg.Server, err = askServer(""); err != nil {
+			return err
+		}
+		serverChanged = true
+	}
+
+	creds, err := promptCredentials(cfg)
 	if err != nil {
 		return err
 	}
-
-	token, err := readSecret("API Token: ")
-	if err != nil {
+	if err := creds.save(); err != nil {
 		return err
 	}
-	if token == "" {
-		return fmt.Errorf("API token is required")
-	}
-
-	// Save credentials
-	if err := keyring.SetUsername(username); err != nil {
-		return fmt.Errorf("failed to save username: %w", err)
-	}
-	if err := keyring.SetToken(token); err != nil {
-		return fmt.Errorf("failed to save token: %w", err)
+	if serverChanged {
+		if err := cfg.Save(); err != nil {
+			return fmt.Errorf("failed to save config: %w", err)
+		}
 	}
 
 	fmt.Println("Credentials saved to system keyring.")
@@ -133,7 +137,7 @@ func runAuthCreate(cmd *cobra.Command, args []string) error {
 
 func runAuthTest(cmd *cobra.Command, args []string) error {
 	if !keyring.HasCredentials() {
-		return fmt.Errorf("no credentials stored, run 'jiractl auth create' first")
+		return fmt.Errorf("no credentials stored, run 'jiractl configure' first")
 	}
 
 	cfg, err := config.Load()

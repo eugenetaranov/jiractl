@@ -58,17 +58,6 @@ func init() {
 	RootCmd.AddCommand(createCmd)
 }
 
-func loadConfig() (*config.Config, error) {
-	cfg, err := config.Load()
-	if err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
-	}
-	if cfg.Server == "" || cfg.Project == "" {
-		return nil, fmt.Errorf("not configured, run 'jiractl configure' first")
-	}
-	return cfg, nil
-}
-
 type epicCheckResult struct {
 	state jira.EpicState
 	issue *jiralib.Issue
@@ -260,6 +249,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	deleteDraft()
 
 	url := fmt.Sprintf("%s/browse/%s", cfg.Server, issue.Key)
+	menuStatus = fmt.Sprintf("Created %s  %s", issue.Key, url)
 	if interactive {
 		fmt.Printf("\nCreated issue: %s\n%s\n", issue.Key, url)
 	} else {

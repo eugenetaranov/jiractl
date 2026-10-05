@@ -21,7 +21,14 @@ sleep 0.5
 
 FAILED=0
 pass() { echo "ok   $1"; }
-fail() { echo "FAIL $1: $2"; FAILED=1; }
+fail() {
+  echo "FAIL $1: $2"
+  FAILED=1
+  if [ -f "$WORK/out.log" ]; then
+    echo "  --- last terminal output:"
+    LC_ALL=C tr -d '\033' < "$WORK/out.log" | LC_ALL=C tr '\r' '\n' | grep -a -v '^\s*$' | tail -15 | sed 's/^/  | /'
+  fi
+}
 
 # new_home writes a config and prints the HOME directory.
 new_home() {
@@ -40,7 +47,10 @@ set timeout 10
 log_file -noappend $WORK/out.log
 spawn env EDITOR=$WORK/editor.sh HOME=$home XDG_STATE_HOME=$home/state JIRACTL_TEST_USERNAME=u JIRACTL_TEST_TOKEN=t $BIN $args
 $body
-expect eof
+expect {
+  eof {}
+  timeout { exec kill -9 [exp_pid] }
+}
 catch wait result
 exit [lindex \$result 3]
 EXP
@@ -79,26 +89,52 @@ expect "open epics" { sleep 0.5; send "Skip" }
 sleep 0.5
 send "\r"
 expect "Create?" { send "\r" }'
-if [ -s "$STUB_LOG" ] && ! grep -q parent "$STUB_LOG" && grep -q 'epic_link = "OPS-12"' "$H/.jiractl.toml"; then
+if grep -q '"method": "POST"' "$STUB_LOG" && ! grep -q parent "$STUB_LOG" && grep -q 'epic_link = "OPS-12"' "$H/.jiractl.toml"; then
   pass "missing epic: skip"
 else
   fail "missing epic: skip" "$(cat "$STUB_LOG")"
 fi
 
-# --- configure: wrong project is re-asked and nothing is saved
+# --- configure: rejected token is re-asked; three failures save nothing
 H=$(new_home '# my comment')
 cp "$H/.jiractl.toml" "$WORK/orig"
 run_expect "$H" '
 expect "Server URL" { send "\r" }
-expect "Project Key" { send "nope\r" }
 expect "Username" { send "u\r" }
-expect "API Token" { send "secret\r" }
-expect "Project Key" { send "nope\r" }
-expect "Project Key" { send "nope\r" }' configure
-if [ "$EXIT" = 1 ] && cmp -s "$WORK/orig" "$H/.jiractl.toml"; then
-  pass "configure: failed validation saves nothing"
+expect "API Token" { send "bad\r" }
+expect "Username" { send "u\r" }
+expect "API Token" { send "bad\r" }
+expect "Username" { send "u\r" }
+expect "API Token" { send "bad\r" }' configure
+if [ "$EXIT" = 1 ] && cmp -s "$WORK/orig" "$H/.jiractl.toml" && out_has "credentials rejected"; then
+  pass "configure: rejected token saves nothing"
 else
-  fail "configure: failed validation saves nothing" "exit=$EXIT"
+  fail "configure: rejected token saves nothing" "exit=$EXIT"
+fi
+
+# --- first run: offer setup, scheme added, project picked, starter queries, menu
+H=$(mktemp -d "$WORK/home.XXXX")
+run_expect "$H" '
+expect "Run setup now?" { send "\r" }
+expect "Server URL" { send "http://127.0.0.1:'"$PORT"'/\r" }
+expect "Username" { send "u\r" }
+expect "API Token" { send "good\r" }
+expect "Select project" { sleep 0.5; send "OPS" }
+sleep 0.5
+send "\r"
+expect "default issue type" { sleep 0.5; send "\033" }
+expect "default epic" { sleep 0.5; send "\033" }
+expect "Select action" { sleep 0.5; send "\033" }' ""
+if [ "$EXIT" = 0 ] && python3 - "$H/.jiractl.toml" <<'PY'
+import sys, tomllib
+c = tomllib.load(open(sys.argv[1], "rb"))
+assert c["project"] == "OPS", c
+assert [q["name"] for q in c["queries"]] == ["mine", "recent", "unassigned"], c
+PY
+then
+  pass "first run: setup then menu"
+else
+  fail "first run: setup then menu" "exit=$EXIT $(cat "$H/.jiractl.toml" 2>/dev/null)"
 fi
 
 # --- scripted create: flags, stdin description, field by name, key-only stdout
@@ -110,7 +146,7 @@ EXIT=$?
 set -e
 if [ "$EXIT" = 0 ] && [ "$OUT" = "OPS-99" ] && python3 - "$STUB_LOG" <<'PY'
 import json, sys
-f = json.loads(open(sys.argv[1]).read())["fields"]
+f = [e for e in map(json.loads, open(sys.argv[1])) if e.get("path") == "/rest/api/2/issue"][0]["body"]["fields"]
 assert f["issuetype"]["name"] == "Bug", f
 assert f["description"] == "Steps\n\nto reproduce", f
 assert f["customfield_10016"] == "3", f
@@ -129,7 +165,7 @@ set +e
 ERR=$(HOME=$H JIRACTL_TEST_USERNAME=u JIRACTL_TEST_TOKEN=t "$BIN" create -s x -y 2>&1 >/dev/null)
 EXIT=$?
 set -e
-if [ "$EXIT" = 1 ] && [[ "$ERR" == *"issue type required: pass -t or set issue_defaults.issue_type"* ]] && [ ! -s "$STUB_LOG" ]; then
+if [ "$EXIT" = 1 ] && [[ "$ERR" == *"issue type required: pass -t or set issue_defaults.issue_type"* ]] && ! grep -q '"method"' "$STUB_LOG"; then
   pass "scripted create: missing type"
 else
   fail "scripted create: missing type" "exit=$EXIT err=$ERR"
@@ -164,12 +200,12 @@ expect "Create?" { send "e\r" }
 expect "Edit which field" { sleep 0.5; send "Summary" }
 sleep 0.5
 send "\r"
-expect "Summary" { send "Fixed summary\r" }
+expect "Summary \\\[Typo" { send "Fixed summary\r" }
 expect "Create?" { send "d\r" }
 expect "Create?" { send "\r" }' "create"
 if python3 - "$STUB_LOG" <<'PY'
 import json, sys
-f = json.loads(open(sys.argv[1]).read())["fields"]
+f = [e for e in map(json.loads, open(sys.argv[1])) if e.get("path") == "/rest/api/2/issue"][0]["body"]["fields"]
 assert f["summary"] == "Fixed summary", f
 assert f["description"] == "Edited in editor\n\nSecond paragraph", f
 assert f["customfield_15838"] == {"value": "Ops"}, f
@@ -179,6 +215,64 @@ then
   pass "interactive: edit and editor"
 else
   fail "interactive: edit and editor" "$(cat "$STUB_LOG")"
+fi
+
+# --- query: prefix match, JSON output, ADF description flattened
+H=$(new_home '[[queries]]' 'name = "mine"' 'jql = "project = ${project} AND assignee = currentUser()"')
+set +e
+OUT=$(HOME=$H JIRACTL_TEST_USERNAME=u JIRACTL_TEST_TOKEN=t "$BIN" query MI -o json 2>/dev/null)
+EXIT=$?
+set -e
+if [ "$EXIT" = 0 ] && python3 -c '
+import json, sys
+d = json.loads(sys.argv[1])
+assert d[0] == {"key": "OPS-1", "summary": "Fix login", "status": "To Do", "assignee": "Ann"}, d
+' "$OUT"; then
+  pass "query: prefix + json"
+else
+  fail "query: prefix + json" "exit=$EXIT out=$OUT"
+fi
+
+# --- query: piped output is a table, no picker, banner on stderr
+set +e
+OUT=$(HOME=$H JIRACTL_TEST_USERNAME=u JIRACTL_TEST_TOKEN=t "$BIN" query mine 2>/dev/null | cat)
+set -e
+if [ "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')" = 2 ] && [[ "$OUT" == OPS-1* ]] && [[ "$OUT" != *"Running query"* ]]; then
+  pass "query: piped table"
+else
+  fail "query: piped table" "$OUT"
+fi
+
+# --- query: unknown name lists available; --jql expands ${project}; bad JQL explained
+set +e
+ERR=$(HOME=$H JIRACTL_TEST_USERNAME=u JIRACTL_TEST_TOKEN=t "$BIN" query foo 2>&1)
+EXIT1=$?
+: > "$STUB_LOG"
+HOME=$H JIRACTL_TEST_USERNAME=u JIRACTL_TEST_TOKEN=t "$BIN" query --jql 'project = ${project} AND labels = urgent' -o keys >/dev/null 2>&1
+ERR2=$(HOME=$H JIRACTL_TEST_USERNAME=u JIRACTL_TEST_TOKEN=t "$BIN" query --jql 'bad = 1' -o keys 2>&1)
+set -e
+if [ "$EXIT1" = 1 ] && [[ "$ERR" == *'no query "foo"; available: mine'* ]] && grep -q '"jql": "project = OPS AND labels = urgent"' "$STUB_LOG" && [[ "$ERR2" == *"'bad' is not a field"* ]]; then
+  pass "query: errors and --jql"
+else
+  fail "query: errors and --jql" "$ERR | $ERR2"
+fi
+
+# --- query: browse, preview, transition, back to list, Esc exits 0
+: > "$STUB_LOG"
+run_expect "$H" '
+expect "Login fails on Safari" {}
+sleep 0.3
+send "\r"
+expect "Open in browser" { sleep 0.5; send "Transition" }
+sleep 0.5
+send "\r"
+expect "In Progress" { sleep 0.5; send "\r" }
+expect "Back" { sleep 0.5; send "\033" }
+expect "mine (2 found)" { sleep 0.5; send "\033" }' "query mine"
+if [ "$EXIT" = 0 ] && grep '"path": "/rest/api/2/issue/OPS-1/transitions"' "$STUB_LOG" | grep -q '"transition": {"id": "21"}'; then
+  pass "query: browse and transition"
+else
+  fail "query: browse and transition" "exit=$EXIT $(cat "$STUB_LOG")"
 fi
 
 exit $FAILED
