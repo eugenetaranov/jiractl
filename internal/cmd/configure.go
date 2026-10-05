@@ -115,6 +115,7 @@ func runConfigure(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  Queries:            added %s (try 'jiractl query mine')\n", strings.Join(updated.QueryNames(), ", "))
 	}
 	menuStatus = "Configuration saved"
+	runPostConfigureDoctor()
 	return nil
 }
 

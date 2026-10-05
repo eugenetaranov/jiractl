@@ -153,6 +153,25 @@ jiractl query mine -o json      # [{"key", "summary", "status", "assignee"}, ...
 jiractl query mine | grep Bug   # piped: plain table, no picker
 ```
 
+### `jiractl doctor`
+
+Checks that jiractl is ready to create issues and run queries, and says what to fix:
+
+```
+[ok]   Authentication      Eugene <eugene@example.com>
+[ok]   Project             OPS (5 issue types)
+[warn] Transition issues   missing TRANSITION_ISSUES in OPS; 'Transition' won't work
+  → ask a Jira admin for the "Transition issues" permission in OPS
+[fail] Default component   component "Backnd" doesn't exist in OPS
+  → set issue_defaults.component = "Backend"
+[fail] Saved queries       recent: Error in the JQL Query: Expecting a date but got '-7x'.
+  → fix the jql of these [[queries]] in ~/.jiractl.toml
+```
+
+It checks the config file (syntax, `0600` permissions, unknown keys), credentials, server, authentication, project, your permissions (browse, create, assign, transition, comment), the default issue type, epic, component, assignee and custom fields (on the create screen, with allowed values, plus required fields that have no default), and the JQL of every saved query. Checks that depend on a failed one are skipped.
+
+Problems that would make `create` or `query` fail are failures (exit 1); problems that only disable one action are warnings (exit 0). `--json` prints `[{"id", "title", "status", "detail", "hint"}]`. `configure` runs the same checks when it finishes, and `jiractl auth test` runs the credential checks.
+
 ### `jiractl auth`
 
 Manage authentication credentials:
@@ -161,7 +180,7 @@ Manage authentication credentials:
 jiractl auth list    # Show stored credentials
 jiractl auth create  # Create/update credentials (checked against Jira before saving)
 jiractl auth delete  # Remove credentials
-jiractl auth test    # Test connection to Jira
+jiractl auth test    # Check config, credentials, server and authentication
 ```
 
 ## Configuration

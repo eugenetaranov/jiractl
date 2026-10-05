@@ -61,6 +61,15 @@ class H(http.server.BaseHTTPRequestHandler):
                 {"id": "customfield_10016", "name": "Story Points", "custom": True},
                 {"id": "customfield_15838", "name": "Work Allocation", "custom": True},
             ])
+        if u.path == "/rest/api/2/mypermissions":
+            names = q.get("permissions", [""])[0].split(",")
+            return self.send(200, {"permissions": {n: {"havePermission": True} for n in names}})
+        if u.path == "/rest/api/2/project/OPS/components":
+            return self.send(200, [{"name": "Backend"}])
+        if u.path == "/rest/api/2/issue/createmeta/OPS/issuetypes":
+            return self.send(200, {"issueTypes": [{"id": "1", "name": "Task"}, {"id": "2", "name": "Bug"}]})
+        if u.path.startswith("/rest/api/2/issue/createmeta/OPS/issuetypes/"):
+            return self.send(200, {"fields": [{"fieldId": "summary", "name": "Summary", "required": True}]})
         if u.path.endswith("/transitions"):
             return self.send(200, {"transitions": [{"id": "21", "name": "Start", "to": {"name": "In Progress"}}]})
         if u.path.startswith("/rest/api/2/issue/"):
@@ -92,6 +101,12 @@ class H(http.server.BaseHTTPRequestHandler):
         return self.send(204)
 
     def do_POST(self):
+        if self.path.startswith("/rest/api/3/jql/parse"):
+            n = int(self.headers.get("Content-Length", 0))
+            queries = json.loads(self.rfile.read(n))["queries"]
+            return self.send(200, {"queries": [
+                {"query": q, "errors": ["Error in the JQL Query: 'bad' is not a field."] if "bad" in q else []}
+                for q in queries]})
         self.write("POST")
 
     def do_PUT(self):

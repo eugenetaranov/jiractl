@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	jira "github.com/andygrunwald/go-jira"
 	"github.com/eugenetaranov/jiractl/internal/config"
@@ -46,6 +47,9 @@ func NewClient(cfg *config.Config) (*Client, error) {
 	return NewClientWith(cfg, username, token)
 }
 
+// requestTimeout bounds every request to Jira.
+const requestTimeout = 30 * time.Second
+
 // NewClientWith creates a client from explicit credentials, so values can be
 // tested before anything is written to the keyring or config file.
 //
@@ -60,6 +64,8 @@ func NewClientWith(cfg *config.Config, username, token string) (*Client, error) 
 		}
 		httpClient = tp.Client()
 	}
+	// Never hang forever on an unresponsive server.
+	httpClient = &http.Client{Transport: httpClient.Transport, Timeout: requestTimeout}
 
 	client, err := jira.NewClient(httpClient, cfg.Server)
 	if err != nil {

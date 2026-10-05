@@ -52,6 +52,16 @@ var (
 )
 
 func Load() (*Config, error) {
+	return load(true)
+}
+
+// LoadQuiet loads the config without warning about unknown keys, for callers
+// that report them themselves.
+func LoadQuiet() (*Config, error) {
+	return load(false)
+}
+
+func load(warnUnknown bool) (*Config, error) {
 	path, err := ConfigPath()
 	if err != nil {
 		return nil, err
@@ -67,6 +77,9 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
+	if !warnUnknown {
+		return cfg, nil
+	}
 	warnedMu.Lock()
 	for _, key := range md.Undecoded() {
 		k := key.String()
@@ -196,4 +209,23 @@ func (c *Config) QueryNames() []string {
 		names[i] = q.Name
 	}
 	return names
+}
+
+// UnknownKeys returns the keys in the config file that jiractl doesn't use,
+// without printing warnings.
+func UnknownKeys() ([]string, error) {
+	path, err := ConfigPath()
+	if err != nil {
+		return nil, err
+	}
+	var cfg Config
+	md, err := toml.DecodeFile(path, &cfg)
+	if err != nil {
+		return nil, err
+	}
+	var keys []string
+	for _, k := range md.Undecoded() {
+		keys = append(keys, k.String())
+	}
+	return keys, nil
 }

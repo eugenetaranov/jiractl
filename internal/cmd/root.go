@@ -24,6 +24,9 @@ var (
 // errVersionShown stops command execution after --version printed the version.
 var errVersionShown = errors.New("version shown")
 
+// errSilentFailure exits 1 for a command that already reported its problems.
+var errSilentFailure = errors.New("failed")
+
 var RootCmd = &cobra.Command{
 	Use:           "jiractl",
 	Short:         "CLI tool for interacting with Jira",
@@ -157,6 +160,8 @@ func Execute() {
 	case errors.Is(err, ErrCancelled):
 		fmt.Fprintln(os.Stderr, "Cancelled.")
 		os.Exit(130)
+	case errors.Is(err, errSilentFailure):
+		os.Exit(1)
 	default:
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(1)

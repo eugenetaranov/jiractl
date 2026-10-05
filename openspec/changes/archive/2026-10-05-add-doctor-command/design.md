@@ -45,7 +45,10 @@ Fail severity is for problems that make `create` or `query` fail. Warn severity 
 Human output: `✓ Authentication  — Eugene (eugene@…)`. On Warn or Fail, an indented `→ hint` line follows. When stdout is not a TTY or `NO_COLOR` is set, plain ASCII markers are used (`[ok] [warn] [fail] [skip]`). `--json` prints `[{id,title,status,detail,hint}]`. The exit code is 1 if any check is Fail.
 
 ### Timeouts
-Each network check gets a 10 s timeout. The project-scoped checks (permissions, createmeta, components, JQL) run in parallel after `project` passes. The output stays in registry order.
+Every request to Jira has a 30 s timeout (set on the HTTP client, so all commands benefit). The project-scoped checks (permissions, default epic, component, assignee, custom fields, JQL) run in parallel after `project` passes. The output stays in registry order.
+
+### Required fields
+Besides validating configured custom fields, `default.fields` warns about fields the create screen requires that have no default value and aren't covered by `issue_defaults`, because `create` would fail on them unless they're passed with `-F`.
 
 ### Reuse in configure
 After it saves, `configure` runs the registry, minus `config.*`, and prints the result. Failures there don't change the exit code, because configure already validated what it needs.

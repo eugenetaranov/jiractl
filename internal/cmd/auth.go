@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/eugenetaranov/jiractl/internal/config"
-	"github.com/eugenetaranov/jiractl/internal/jira"
+	"github.com/eugenetaranov/jiractl/internal/doctor"
 	"github.com/eugenetaranov/jiractl/internal/keyring"
 	"github.com/spf13/cobra"
 )
@@ -135,37 +135,24 @@ func runAuthCreate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// runAuthTest runs the credential-related doctor checks.
 func runAuthTest(cmd *cobra.Command, args []string) error {
-	if !keyring.HasCredentials() {
-		return fmt.Errorf("no credentials stored, run 'jiractl configure' first")
+	var checks []doctor.Check
+	for _, c := range doctor.Checks(true) {
+		switch c.ID {
+		case "config", "creds", "server", "auth":
+			checks = append(checks, c)
+		}
 	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	if cfg.Server == "" {
-		return fmt.Errorf("server not configured, run 'jiractl configure' first")
-	}
-
-	username, token, _ := keyring.GetCredentials()
-
-	fmt.Fprintf(os.Stderr, "Testing connection to %s...\n", cfg.Server)
+	ctx := doctor.NewCtx()
 	if debug {
-		fmt.Fprintf(os.Stderr, "  Username: %s\n", username)
-		fmt.Fprintf(os.Stderr, "  Token length: %d\n", len(token))
+		fmt.Fprintf(os.Stderr, "  Username: %s\n", ctx.Username)
+		fmt.Fprintf(os.Stderr, "  Token length: %d\n", len(ctx.Token))
 	}
-
-	client, err := jira.NewClient(cfg)
-	if err != nil {
-		return fmt.Errorf("failed to create client: %w", err)
+	results := doctor.Run(ctx, checks)
+	doctor.Print(os.Stdout, results, fancyOutput())
+	if doctor.Failed(results) {
+		return errSilentFailure
 	}
-
-	if err := client.TestConnection(); err != nil {
-		return fmt.Errorf("connection failed: %w", err)
-	}
-
-	fmt.Println("Connection successful!")
 	return nil
 }

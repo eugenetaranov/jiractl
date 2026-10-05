@@ -304,4 +304,26 @@ else
   fail "menu: clear default epic" "exit=$EXIT $(cat "$H/.jiractl.toml")"
 fi
 
+# --- doctor: healthy setup exits 0; a broken query and a rejected token exit 1
+H=$(new_home '[issue_defaults]' 'issue_type = "Task"' 'epic_link = "OPS-40"' 'component = "Backend"' '[[queries]]' 'name = "mine"' 'jql = "assignee = currentUser()"')
+chmod 600 "$H/.jiractl.toml"
+set +e
+OUT=$(HOME=$H JIRACTL_TEST_USERNAME=u JIRACTL_TEST_TOKEN=t "$BIN" doctor 2>&1)
+EXIT1=$?
+printf '[[queries]]\nname = "broken"\njql = "bad = 1"\n' >> "$H/.jiractl.toml"
+JSON=$(HOME=$H JIRACTL_TEST_USERNAME=u JIRACTL_TEST_TOKEN=t "$BIN" doctor --json 2>/dev/null)
+EXIT2=$?
+OUT3=$(HOME=$H JIRACTL_TEST_USERNAME=u JIRACTL_TEST_TOKEN=bad "$BIN" doctor 2>&1)
+EXIT3=$?
+set -e
+if [ "$EXIT1" = 0 ] && [[ "$OUT" == *"0 failed"* ]] && [ "$EXIT2" = 1 ] && python3 -c '
+import json, sys
+r = {x["id"]: x for x in json.loads(sys.argv[1])}
+assert r["queries"]["status"] == "fail" and "broken:" in r["queries"]["detail"], r["queries"]
+' "$JSON" && [ "$EXIT3" = 1 ] && [[ "$OUT3" == *"credentials rejected"* ]] && [[ "$OUT3" == *"[skip]"* ]]; then
+  pass "doctor"
+else
+  fail "doctor" "exit=$EXIT1/$EXIT2/$EXIT3 $OUT | $OUT3"
+fi
+
 exit $FAILED
