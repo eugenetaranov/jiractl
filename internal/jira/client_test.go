@@ -23,19 +23,22 @@ func newTestClient(t *testing.T, cfg *config.Config, h http.HandlerFunc) *Client
 	return c
 }
 
+func TestResolveAccountID(t *testing.T) {
+	c := newTestClient(t, &config.Config{}, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("query") != "john@example.com" {
+			t.Errorf("query = %q", r.URL.Query().Get("query"))
+		}
+		io.WriteString(w, `[{"accountId":"abc123","displayName":"John","emailAddress":"john@example.com","active":true}]`)
+	})
+	if id, err := c.ResolveAccountID("john@example.com"); err != nil || id != "abc123" {
+		t.Fatalf("got %q %v", id, err)
+	}
+}
+
 func TestCreateIssueSendsComponentAndAccountID(t *testing.T) {
-	cfg := &config.Config{Project: "P", IssueDefaults: config.IssueDefaults{
-		Component: "Backend",
-		Assignee:  "john@example.com",
-	}}
 	var body map[string]interface{}
-	c := newTestClient(t, cfg, func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, &config.Config{}, func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case strings.HasPrefix(r.URL.Path, "/rest/api/3/user/search"):
-			if r.URL.Query().Get("query") != "john@example.com" {
-				t.Errorf("query = %q", r.URL.Query().Get("query"))
-			}
-			io.WriteString(w, `[{"accountId":"abc123","displayName":"John","emailAddress":"john@example.com","active":true}]`)
 		case r.URL.Path == "/rest/api/2/issue":
 			json.NewDecoder(r.Body).Decode(&body)
 			w.WriteHeader(201)
@@ -45,7 +48,8 @@ func TestCreateIssueSendsComponentAndAccountID(t *testing.T) {
 		}
 	})
 
-	issue, err := c.CreateIssue("P", "Task", "s", "", nil)
+	issue, err := c.CreateIssue(&NewIssue{Project: "P", Type: "Task", Summary: "s", Component: "Backend", AccountID: "abc123",
+		Fields: map[string]string{"customfield_1": `{"value":"Ops"}`}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,6 +64,10 @@ func TestCreateIssueSendsComponentAndAccountID(t *testing.T) {
 	assignee, _ := json.Marshal(fields["assignee"])
 	if string(assignee) != `{"accountId":"abc123"}` {
 		t.Fatalf("assignee = %s", assignee)
+	}
+	cf, _ := json.Marshal(fields["customfield_1"])
+	if string(cf) != `{"value":"Ops"}` {
+		t.Fatalf("custom field = %s", cf)
 	}
 }
 
@@ -88,7 +96,7 @@ func TestAPIErrorFormatting(t *testing.T) {
 		w.WriteHeader(400)
 		io.WriteString(w, `{"errorMessages":[],"errors":{"summary":"Summary is required","parent":"Given parent is invalid"}}`)
 	})
-	_, err := c.CreateIssue("P", "Task", "", "", nil)
+	_, err := c.CreateIssue(&NewIssue{Project: "P", Type: "Task"})
 	apiErr, ok := err.(*APIError)
 	if !ok {
 		t.Fatalf("err %T %v", err, err)

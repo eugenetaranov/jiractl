@@ -78,8 +78,8 @@ func searchEpic(client *jira.Client, project string) (*jiralib.Issue, error) {
 
 // pickEpic is the regular epic choice when no default is configured: recent
 // open epics, plus a row that searches all epics in Jira.
-func pickEpic(client *jira.Client, project string) (*jiralib.Issue, error) {
-	epics, err := client.GetEpics(project)
+func pickEpic(client *jira.Client, project string, recent *pending[[]jiralib.Issue]) (*jiralib.Issue, error) {
+	epics, err := recent.wait("epics")
 	if err != nil {
 		// Non-fatal: just skip epic selection
 		fmt.Fprintf(os.Stderr, "Warning: could not fetch epics: %v\n", err)
@@ -105,9 +105,9 @@ func pickEpic(client *jira.Client, project string) (*jiralib.Issue, error) {
 // recoverEpic runs when the chosen epic can't be used. Interactively it lets
 // the user search for another epic or skip; otherwise it returns an error
 // listing candidates.
-func recoverEpic(cfg *config.Config, client *jira.Client, draft *issueDraft, problem string, fromDefault bool) (*jiralib.Issue, error) {
+func recoverEpic(cfg *config.Config, client *jira.Client, draft *issueDraft, problem string, fromDefault, interactive bool) (*jiralib.Issue, error) {
 	bad := draft.EpicLink
-	if !isInteractive() {
+	if !interactive {
 		return nil, epicCandidatesError(client, cfg.Project, bad, problem)
 	}
 

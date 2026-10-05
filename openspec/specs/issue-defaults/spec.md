@@ -22,10 +22,10 @@ When `issue_defaults.assignee` is not already an account ID, jiractl SHALL resol
 - **THEN** no issue is created, and the error names the configured value and lists any candidates
 
 ### Requirement: Confirm defaults to yes
-The create confirmation SHALL be shown as `[Y/n]`. Pressing Enter SHALL create the issue.
+The create confirmation SHALL be shown as `Create? [Y/e/d/n]`. Pressing Enter SHALL create the issue. `e` and `d` SHALL edit before creating, as described in `issue-create`.
 
 #### Scenario: Enter confirms
-- **WHEN** the user presses Enter at `Create this issue? [Y/n]`
+- **WHEN** the user presses Enter at `Create? [Y/e/d/n]`
 - **THEN** the issue is created
 
 #### Scenario: Explicit no

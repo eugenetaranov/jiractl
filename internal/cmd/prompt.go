@@ -78,9 +78,11 @@ func promptTextWithDefault(label, defaultVal string, required bool) (string, err
 	}
 }
 
-// promptMultilineText prompts for multiline text input. Empty line signals completion.
+// promptMultilineText reads text that may contain blank lines. A line with
+// only "." or Ctrl+D finishes; ":e" on its own line opens $EDITOR with what
+// was typed so far. Ctrl+C cancels.
 func promptMultilineText(label string) (string, error) {
-	fmt.Fprintf(os.Stderr, "%s (empty line to finish):\n", label)
+	fmt.Fprintf(os.Stderr, "%s (finish with \".\" on its own line or Ctrl+D; \":e\" opens your editor):\n", label)
 
 	rl, err := newReadline("> ")
 	if err != nil {
@@ -91,20 +93,32 @@ func promptMultilineText(label string) (string, error) {
 	var lines []string
 	for {
 		line, err := rl.Readline()
-		if err == readline.ErrInterrupt || err == io.EOF {
+		if err == readline.ErrInterrupt {
 			return "", ErrCancelled
+		}
+		if err == io.EOF {
+			break
 		}
 		if err != nil {
 			return "", err
 		}
 
-		if line == "" {
-			break
+		switch strings.TrimSpace(line) {
+		case ".":
+			return joinLines(lines), nil
+		case ":e":
+			rl.Close()
+			return openEditor(joinLines(lines))
 		}
 		lines = append(lines, line)
 	}
 
-	return strings.Join(lines, "\n"), nil
+	return joinLines(lines), nil
+}
+
+// joinLines joins lines and drops trailing blank ones.
+func joinLines(lines []string) string {
+	return strings.TrimRight(strings.Join(lines, "\n"), "\n ")
 }
 
 // promptConfirm asks a yes/no question. Enter picks the default.

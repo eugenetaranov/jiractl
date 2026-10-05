@@ -30,6 +30,12 @@ class H(http.server.BaseHTTPRequestHandler):
             if key in EPICS:
                 return self.send(200, EPICS[key])
             return self.send(404, {"errorMessages": ["Issue does not exist or you do not have permission to see it."]})
+        if u.path == "/rest/api/2/field":
+            return self.send(200, [
+                {"id": "summary", "name": "Summary", "custom": False},
+                {"id": "customfield_10016", "name": "Story Points", "custom": True},
+                {"id": "customfield_15838", "name": "Work Allocation", "custom": True},
+            ])
         if u.path == "/rest/api/3/search/jql":
             jql = q.get("jql", [""])[0].lower()
             if "devops" in jql or "k8s" in jql:

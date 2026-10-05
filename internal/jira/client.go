@@ -68,9 +68,19 @@ func NewClientWith(cfg *config.Config, username, token string) (*Client, error) 
 	}, nil
 }
 
-// CreateIssueOptions contains optional fields for issue creation
-type CreateIssueOptions struct {
-	EpicLink string
+// NewIssue is the complete payload for a new issue. The caller fills it from
+// config defaults, drafts, flags and prompts, so what the review screen shows
+// is exactly what gets sent.
+type NewIssue struct {
+	Project     string
+	Type        string
+	Summary     string
+	Description string
+	EpicLink    string
+	AccountID   string // assignee
+	Component   string
+	Labels      []string
+	Fields      map[string]string // custom field ID -> raw value
 }
 
 // parseCustomFieldValue interprets a config string as JSON when it looks like
@@ -89,66 +99,60 @@ func parseCustomFieldValue(raw string) interface{} {
 }
 
 // CreateIssue creates a new issue in Jira
-func (c *Client) CreateIssue(project, issueType, summary, description string, opts *CreateIssueOptions) (*jira.Issue, error) {
+func (c *Client) CreateIssue(n *NewIssue) (*jira.Issue, error) {
 	issue := &jira.Issue{
 		Fields: &jira.IssueFields{
-			Project: jira.Project{
-				Key: project,
-			},
-			Type: jira.IssueType{
-				Name: issueType,
-			},
-			Summary:     summary,
-			Description: description,
+			Project:     jira.Project{Key: n.Project},
+			Type:        jira.IssueType{Name: n.Type},
+			Summary:     n.Summary,
+			Description: n.Description,
+			Labels:      n.Labels,
+			Unknowns:    tcontainer.MarshalMap{},
 		},
 	}
-
-	// Apply defaults from config
-	var assignee map[string]string
-	if c.config.IssueDefaults.Assignee != "" {
-		accountID, err := c.ResolveAccountID(c.config.IssueDefaults.Assignee)
-		if err != nil {
-			return nil, err
-		}
+	if n.Component != "" {
+		issue.Fields.Components = []*jira.Component{{Name: n.Component}}
+	}
+	if n.EpicLink != "" {
+		// Team-managed projects (and Jira Cloud generally) link epics through
+		// the parent field.
+		issue.Fields.Parent = &jira.Parent{Key: n.EpicLink}
+	}
+	if n.AccountID != "" {
 		// Sent as a raw field: go-jira's User type always serializes an
 		// empty Password, which has no place in a create request.
-		assignee = map[string]string{"accountId": accountID}
+		issue.Fields.Unknowns["assignee"] = map[string]string{"accountId": n.AccountID}
 	}
-	if c.config.IssueDefaults.Component != "" && len(issue.Fields.Components) == 0 {
-		issue.Fields.Components = []*jira.Component{{Name: c.config.IssueDefaults.Component}}
-	}
-	if len(c.config.IssueDefaults.Labels) > 0 && len(issue.Fields.Labels) == 0 {
-		issue.Fields.Labels = c.config.IssueDefaults.Labels
-	}
-
-	// Apply epic link if provided. The caller decides whether the configured
-	// default applies, so "create without epic" really means no epic.
-	epicLink := ""
-	if opts != nil {
-		epicLink = opts.EpicLink
-	}
-
-	if epicLink != "" {
-		// Epic Link is typically a custom field. In Jira Cloud, it's often "parent" for next-gen projects
-		// or a custom field like "customfield_10014" for classic projects.
-		// We'll use the parent field which works for next-gen/team-managed projects.
-		issue.Fields.Parent = &jira.Parent{Key: epicLink}
-	}
-
-	issue.Fields.Unknowns = tcontainer.MarshalMap{}
-	for k, raw := range c.config.IssueDefaults.CustomFields {
+	for k, raw := range n.Fields {
 		issue.Fields.Unknowns[k] = parseCustomFieldValue(raw)
-	}
-	if assignee != nil {
-		issue.Fields.Unknowns["assignee"] = assignee
 	}
 
 	created, resp, err := c.Issue.Create(issue)
 	if err != nil {
 		return nil, wrapError(resp, err)
 	}
-
 	return created, nil
+}
+
+// Field describes a Jira field from /rest/api/2/field.
+type Field struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Custom bool   `json:"custom"`
+}
+
+// GetFields returns every field defined in the instance.
+func (c *Client) GetFields() ([]Field, error) {
+	req, err := c.NewRequest("GET", "rest/api/2/field", nil)
+	if err != nil {
+		return nil, err
+	}
+	var fields []Field
+	resp, err := c.Do(req, &fields)
+	if err != nil {
+		return nil, wrapError(resp, err)
+	}
+	return fields, nil
 }
 
 // SearchIssues searches for issues using JQL via the v3 API

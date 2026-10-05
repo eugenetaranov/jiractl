@@ -17,6 +17,15 @@ type issueDraft struct {
 	Summary     string    `json:"summary"`
 	Description string    `json:"description,omitempty"`
 	EpicLink    string    `json:"epic_link,omitempty"`
+	Assignee    string    `json:"assignee,omitempty"`
+	Component   string    `json:"component,omitempty"`
+	Labels      []string  `json:"labels,omitempty"`
+	// DefaultsApplied is set once issue_defaults were copied into the draft,
+	// so a resumed draft keeps the user's edits instead of re-applying them.
+	DefaultsApplied bool `json:"defaults_applied,omitempty"`
+	// Fields holds custom field values set for this issue (ID -> raw value),
+	// on top of issue_defaults.custom_fields.
+	Fields map[string]string `json:"fields,omitempty"`
 }
 
 func draftPath() (string, error) {

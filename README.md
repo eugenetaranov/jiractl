@@ -78,13 +78,42 @@ Saving only changes the keys whose values changed, so comments and formatting in
 
 ### `jiractl create`
 
-Interactively create a new Jira issue. Prompts for summary, description and epic. The issue type is asked only when `issue_defaults.issue_type` is not set; the epic only when `issue_defaults.epic_link` is not set.
+Create a new Jira issue. Issue types, epics and field names are fetched in the background while you type, so the prompts don't stall.
+
+Interactively, you're asked for the summary, description and epic. The issue type is asked only when `issue_defaults.issue_type` is not set, and the epic only when `issue_defaults.epic_link` is not set.
+
+The description can have several paragraphs: finish it with a line containing only `.` (or Ctrl+D), or type `:e` on its own line to continue in `$EDITOR`.
+
+Before anything is sent, every field is listed with its Jira name (`Story Points: 3`, not `customfield_10016`), followed by `Create? [Y/e/d/n]`:
+
+| Key | Action |
+| --- | --- |
+| Enter / `y` | Create the issue |
+| `e` | Edit a field: type, summary, description, epic, assignee, component, labels, any custom field, or add one |
+| `d` | Edit the description in `$EDITOR` |
+| `n` | Save a draft and cancel |
+
+If you answer no, or Jira rejects the issue, what you typed is saved as a draft (`~/.local/state/jiractl/draft.json`) and the next `jiractl create` offers to resume it.
 
 If the epic (from `issue_defaults.epic_link`, a draft, or your choice) doesn't exist or isn't an epic, `create` keeps what you typed and asks you to search for another one: type words such as `devops k8s` or a key, then pick from the matching epics, or choose `Skip: create without epic`. If the missing epic was your default, you're offered to save the new one as default. The epic picker also has a `Search all epics…` row for epics beyond the most recent ones.
 
-Use `jiractl create --no-epic` to create an issue without an epic, ignoring the default.
+#### Scripting
 
-The confirm step defaults to yes (`[Y/n]`). If you answer no, or Jira rejects the issue, what you typed is saved as a draft (`~/.local/state/jiractl/draft.json`) and the next `jiractl create` offers to resume it.
+| Flag | Meaning |
+| --- | --- |
+| `-s, --summary` | Summary |
+| `-t, --type` | Issue type (case-insensitive; default `issue_defaults.issue_type`) |
+| `-e, --epic` | Epic key (default `issue_defaults.epic_link`) |
+| `--no-epic` | No epic, even if a default is set |
+| `-d, --description` | Description; `-d -` reads it from stdin |
+| `-F, --field name=value` | Set a field by name or `customfield_` ID; repeatable |
+| `-y, --yes` | No prompts and no confirmation |
+
+With `-y`, or when stdin is not a terminal, nothing is asked. Missing required values are an error, and only the new key is printed to stdout (the URL goes to stderr):
+
+```bash
+KEY=$(git log -1 --format=%B | jiractl create -s "Fix login" -t bug -d - -F "Story Points=3" -y)
+```
 
 ### `jiractl inspect <issue-url-or-key>`
 
