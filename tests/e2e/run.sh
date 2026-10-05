@@ -40,7 +40,7 @@ new_home() {
 
 # run_expect HOME SCRIPT: runs jiractl with the given expect body.
 run_expect() {
-  local home=$1 body=$2 args=${3:-create}
+  local home=$1 body=$2 args=${3-create}
   : > "$STUB_LOG"
   cat > "$WORK/s.exp" <<EXP
 set timeout 10
@@ -273,6 +273,35 @@ if [ "$EXIT" = 0 ] && grep '"path": "/rest/api/2/issue/OPS-1/transitions"' "$STU
   pass "query: browse and transition"
 else
   fail "query: browse and transition" "exit=$EXIT $(cat "$STUB_LOG")"
+fi
+
+# --- menu: header shows a missing default epic; change it, then clear it
+H=$(new_home '' '[issue_defaults]' '# team epic' 'epic_link = "OPS-12"')
+run_expect "$H" '
+expect "Default epic: OPS-12 (not found)" { sleep 0.5; send "Change" }
+sleep 0.5
+send "\r"
+expect "Change default epic (Esc keeps OPS-12)" { sleep 0.5; send "OPS-41" }
+sleep 0.5
+send "\r"
+expect "Default epic: OPS-41 Billing revamp" { sleep 0.5; send "\033" }' ""
+if [ "$EXIT" = 0 ] && grep -q 'epic_link = "OPS-41"' "$H/.jiractl.toml" && grep -q '# team epic' "$H/.jiractl.toml"; then
+  pass "menu: change default epic"
+else
+  fail "menu: change default epic" "exit=$EXIT $(cat "$H/.jiractl.toml")"
+fi
+run_expect "$H" '
+expect "Select action" { sleep 0.5; send "Change" }
+sleep 0.5
+send "\r"
+expect "OPS-41" { sleep 0.5; send "None" }
+sleep 0.5
+send "\r"
+expect "Default epic: none" { sleep 0.5; send "\033" }' ""
+if [ "$EXIT" = 0 ] && ! grep -q 'epic_link' "$H/.jiractl.toml"; then
+  pass "menu: clear default epic"
+else
+  fail "menu: clear default epic" "exit=$EXIT $(cat "$H/.jiractl.toml")"
 fi
 
 exit $FAILED

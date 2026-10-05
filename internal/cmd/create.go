@@ -89,10 +89,7 @@ func startPrefetch(cfg *config.Config, client *jira.Client, epicKey, assignee st
 		assignee:    ready(""),
 	}
 	if epicKey != "" {
-		pf.defaultEpic = fetch(func() (epicCheckResult, error) {
-			state, issue, err := client.CheckEpic(epicKey)
-			return epicCheckResult{state, issue, err}, nil
-		})
+		pf.defaultEpic = lookupEpic(client, epicKey)
 	}
 	if assignee != "" {
 		pf.assignee = fetch(func() (string, error) { return client.ResolveAccountID(assignee) })
@@ -417,7 +414,7 @@ type reviewRow struct {
 	label, value string
 }
 
-func reviewRows(draft *issueDraft, names *fieldNames, epic *jiralib.Issue) []reviewRow {
+func reviewRows(draft *issueDraft, names *fieldNames, epic *jiralib.Issue, defaultEpic string) []reviewRow {
 	rows := []reviewRow{
 		{"Type", draft.IssueType},
 		{"Summary", draft.Summary},
@@ -425,14 +422,17 @@ func reviewRows(draft *issueDraft, names *fieldNames, epic *jiralib.Issue) []rev
 	if draft.Description != "" {
 		rows = append(rows, reviewRow{"Description", draft.Description})
 	}
+	epicValue := draft.EpicLink
 	switch {
 	case draft.EpicLink == "":
-		rows = append(rows, reviewRow{"Epic", "(none)"})
+		epicValue = "(none)"
 	case epic != nil && epic.Key == draft.EpicLink && epicSummary(epic) != "":
-		rows = append(rows, reviewRow{"Epic", draft.EpicLink + " - " + epicSummary(epic)})
-	default:
-		rows = append(rows, reviewRow{"Epic", draft.EpicLink})
+		epicValue += " - " + epicSummary(epic)
 	}
+	if draft.EpicLink != "" && draft.EpicLink == defaultEpic {
+		epicValue += " (default)"
+	}
+	rows = append(rows, reviewRow{"Epic", epicValue})
 	if draft.Assignee != "" {
 		rows = append(rows, reviewRow{"Assignee", draft.Assignee})
 	}
@@ -484,7 +484,7 @@ func printReview(project string, rows []reviewRow) {
 // false when the user answers n.
 func reviewLoop(cfg *config.Config, client *jira.Client, draft *issueDraft, pf *createPrefetch, names *fieldNames, epic **jiralib.Issue) (bool, error) {
 	for {
-		printReview(cfg.Project, reviewRows(draft, names, *epic))
+		printReview(cfg.Project, reviewRows(draft, names, *epic, cfg.IssueDefaults.EpicLink))
 		choice, err := promptChoice("Create? [Y/e/d/n]: ", "yedn")
 		if err != nil {
 			return false, err

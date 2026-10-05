@@ -1,5 +1,8 @@
-## ADDED Requirements
+# default-epic Specification
 
+## Purpose
+TBD - created by archiving change change-default-epic. Update Purpose after archive.
+## Requirements
 ### Requirement: Default epic shown in main menu
 The main menu header SHALL show the configured default epic's key and summary, or `none` when no default is set.
 
@@ -31,10 +34,10 @@ The create review screen SHALL always include an Epic line and SHALL mark an epi
 - **THEN** the review shows `Epic: (none)`
 
 ### Requirement: Change default epic from the menu
-The main menu SHALL contain `Change default epic`. It SHALL open the epic search with `None: no default epic` as the first row, and SHALL save only `issue_defaults.epic_link`.
+The main menu SHALL contain `Change default epic`. It SHALL open an epic picker listing the current default first, then `None: no default epic`, a row that opens the epic search, and the open epics. It SHALL save only `issue_defaults.epic_link`.
 
 #### Scenario: Pick a new default
-- **WHEN** the user picks `Change default epic`, types `devops k8s`, and selects OPS-40
+- **WHEN** the user picks `Change default epic`, chooses `Search all epics…`, enters `devops k8s`, and selects OPS-40
 - **THEN** `epic_link` becomes `OPS-40`, the rest of `~/.jiractl.toml` is unchanged, and `Default epic set to OPS-40 …` is shown
 
 #### Scenario: Clear the default
@@ -44,3 +47,4 @@ The main menu SHALL contain `Change default epic`. It SHALL open the epic search
 #### Scenario: Esc
 - **WHEN** the user presses Esc in the picker
 - **THEN** the config is unchanged, and the menu is shown again
+

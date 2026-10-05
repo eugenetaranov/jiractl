@@ -65,3 +65,13 @@ func (p *pending[T]) wait(label string) (T, error) {
 		}
 	}
 }
+
+// waitFor returns the value if it arrives within d; ok is false otherwise.
+func (p *pending[T]) waitFor(d time.Duration) (val T, err error, ok bool) {
+	select {
+	case <-p.done:
+		return p.val, p.err, true
+	case <-time.After(d):
+		return val, nil, false
+	}
+}

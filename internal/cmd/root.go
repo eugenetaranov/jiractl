@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/eugenetaranov/jiractl/internal/config"
+	"github.com/eugenetaranov/jiractl/internal/jira"
 	"github.com/spf13/cobra"
 )
 
@@ -91,6 +92,7 @@ func loadConfig() (*config.Config, error) {
 var menuItems = []string{
 	"Create new issue",
 	"Run query",
+	"Change default epic",
 	"Configure",
 	"Exit",
 }
@@ -104,8 +106,13 @@ func runInteractiveMenu(cmd *cobra.Command, args []string) error {
 
 	for {
 		header := "Select action"
+		// Reload each time: configure or the epic entry may have changed it.
+		if cfg, err := config.Load(); err == nil {
+			client, _ := jira.NewClient(cfg)
+			header = defaultEpicLine(cfg, client) + "  │  " + header
+		}
 		if menuStatus != "" {
-			header = header + "   (" + menuStatus + ")"
+			header += "   (" + menuStatus + ")"
 		}
 		idx, err := fzfSelect(menuItems, header)
 		if errors.Is(err, ErrCancelled) {
@@ -122,6 +129,8 @@ func runInteractiveMenu(cmd *cobra.Command, args []string) error {
 			actionErr = createCmd.RunE(createCmd, nil)
 		case "Run query":
 			actionErr = runQueryInteractive()
+		case "Change default epic":
+			actionErr = changeDefaultEpic()
 		case "Configure":
 			actionErr = configureCmd.RunE(configureCmd, nil)
 		case "Exit":

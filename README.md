@@ -66,6 +66,8 @@ Launches an interactive menu with options to create issues, run queries, or conf
 
 Before setup, any interactive command offers to run `jiractl configure` first and then continues with what you asked for.
 
+The menu header always shows your default epic, e.g. `Default epic: OPS-40 DevOps k8s cluster upgrade`, `Default epic: none`, or `OPS-12 (not found)` / `(done)` when it can no longer be used. **Change default epic** picks a new one from the open epics (or `Search all epics…`), or `None: no default epic` to clear it. It only changes `issue_defaults.epic_link`; Esc leaves it as is. The create review also marks an epic that came from your config as `(default)`.
+
 ### `jiractl configure`
 
 Interactive setup. Each step is checked as soon as you enter it:
