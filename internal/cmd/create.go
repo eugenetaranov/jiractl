@@ -12,6 +12,7 @@ import (
 	"github.com/eugenetaranov/jiractl/internal/config"
 	"github.com/eugenetaranov/jiractl/internal/jira"
 	"github.com/eugenetaranov/jiractl/internal/textutil"
+	"github.com/eugenetaranov/jiractl/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -497,7 +498,7 @@ func printReview(project string, rows []reviewRow) {
 func reviewLoop(cfg *config.Config, client *jira.Client, draft *issueDraft, pf *createPrefetch, names *fieldNames, epic **jiralib.Issue) (bool, error) {
 	for {
 		printReview(cfg.Project, reviewRows(draft, names, *epic, cfg.IssueDefaults.EpicLink))
-		choice, err := promptChoice("Create? [Y/e/d/n]: ", "yedn")
+		choice, err := tui.Choice("Create?", "yedn")
 		if err != nil {
 			return false, err
 		}
@@ -521,29 +522,6 @@ func reviewLoop(cfg *config.Config, client *jira.Client, draft *issueDraft, pf *
 	}
 }
 
-// promptChoice reads one of the letters in valid; Enter picks the first.
-func promptChoice(prompt, valid string) (byte, error) {
-	for {
-		rl, err := newReadline(prompt)
-		if err != nil {
-			return 0, err
-		}
-		line, err := rl.Readline()
-		_ = rl.Close()
-		if err != nil {
-			return 0, ErrCancelled
-		}
-		line = strings.ToLower(strings.TrimSpace(line))
-		if line == "" {
-			return valid[0], nil
-		}
-		if strings.IndexByte(valid, line[0]) >= 0 {
-			return line[0], nil
-		}
-		fmt.Fprintf(os.Stderr, "Please answer one of: %s\n", strings.Join(strings.Split(valid, ""), "/"))
-	}
-}
-
 const addFieldRow = "Add field…"
 
 // editField lets the user change one field of the draft. Esc returns to the
@@ -561,7 +539,7 @@ func editField(cfg *config.Config, client *jira.Client, draft *issueDraft, pf *c
 	rows = append(rows, addFieldRow)
 
 	idx, err := fzfSelect(rows, "Edit which field? (Esc to go back)")
-	if errors.Is(err, ErrCancelled) {
+	if tui.IsEsc(err) {
 		return nil
 	}
 	if err != nil {
@@ -580,7 +558,7 @@ func editField(cfg *config.Config, client *jira.Client, draft *issueDraft, pf *c
 	switch rows[idx] {
 	case "Type":
 		t, err := pickIssueType(pf, "Select issue type")
-		if errors.Is(err, ErrCancelled) {
+		if tui.IsEsc(err) {
 			return nil
 		}
 		if err != nil {
@@ -598,7 +576,7 @@ func editField(cfg *config.Config, client *jira.Client, draft *issueDraft, pf *c
 	case "Epic":
 		var e *jiralib.Issue
 		e, err = pickEpic(client, cfg.Project, pf.epics)
-		if errors.Is(err, ErrCancelled) {
+		if tui.IsEsc(err) {
 			return nil
 		}
 		if err == nil {

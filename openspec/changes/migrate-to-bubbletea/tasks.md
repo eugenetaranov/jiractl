@@ -1,0 +1,33 @@
+## 1. Phase 1: Foundation (release v0.3.0)
+
+- [x] 1.1 Spike: run a v2 program under the e2e expect harness; confirm terminal queries don't hang and Esc is delivered immediately
+- [x] 1.2 Add `internal/tui` with stderr output, a TTY guard, an ANSI-16 style set and NO_COLOR handling
+- [x] 1.3 `tui.Select`: inline fuzzy list (sahilm/fuzzy, AND terms), header, bounded height, optional-skip mode
+- [x] 1.4 `tui.Input` (default, required), `tui.Secret` (EchoPassword), `tui.Confirm`, `tui.Choice`
+- [x] 1.5 `tui.Textarea`: Ctrl+D finishes (rebind the default Ctrl+D delete-forward to Delete only), Ctrl+E opens `$EDITOR` via ExecProcess; drop the `.` and `:e` lines
+- [x] 1.6 `tui.Spin` replacing the `pending.wait` spinner
+- [x] 1.7 Switch `prompt.go` helpers to `internal/tui`; port the query browser's preview list to `tui.Select` with a preview pane
+- [x] 1.8 Remove readline and go-fuzzyfinder; `go mod tidy`
+- [x] 1.9 Update e2e expect patterns; whole suite green; teatest goldens per component
+
+## 2. Phase 2: Forms (release v0.4.0)
+
+- [ ] 2.1 `configure` as a Huh form: server, credentials, project, defaults; async validation with spinners; errors under fields
+- [ ] 2.2 `auth create` uses the credentials group
+- [ ] 2.3 Create review model: payload table, y/e/d/n bindings, field edit via Huh
+- [ ] 2.4 Tests: model unit tests, goldens, e2e for configure and create
+
+## 3. Phase 3: App shell (release v0.5.0)
+
+- [ ] 3.1 `tui.App` screen stack; menu screen with a status bar (default epic, last result, last error with hint)
+- [ ] 3.2 Query browser screen: list + preview split (stacked under 100 columns), async refresh of a changed row
+- [ ] 3.3 Actions overlay: open, copy, transition, assign, comment
+- [ ] 3.4 Live epic search component: debounced commands, sequence numbers to drop stale responses, Skip row; used by create, change default epic and configure
+- [ ] 3.5 Hand off to create/configure programs and resume with their result
+- [ ] 3.6 Remove `menuStatus`, `waitForEnter`, and the header text from `checkLogin`
+
+## 4. Phase 4: Cleanup (v0.5.x)
+
+- [ ] 4.1 Delete unused helpers; teatest goldens for every screen
+- [ ] 4.2 README: keys, screenshots or asciinema, NO_COLOR
+- [ ] 4.3 Close the open question on colors

@@ -32,9 +32,3 @@ func TestParseFieldFlag(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
-
-func TestJoinLinesKeepsParagraphs(t *testing.T) {
-	if got := joinLines([]string{"First", "", "Second", "", ""}); got != "First\n\nSecond" {
-		t.Fatalf("got %q", got)
-	}
-}

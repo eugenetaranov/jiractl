@@ -15,7 +15,7 @@ import (
 	"github.com/eugenetaranov/jiractl/internal/config"
 	"github.com/eugenetaranov/jiractl/internal/jira"
 	"github.com/eugenetaranov/jiractl/internal/textutil"
-	fuzzyfinder "github.com/ktr0731/go-fuzzyfinder"
+	"github.com/eugenetaranov/jiractl/internal/tui"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -274,16 +274,16 @@ var issueActions = []string{"Open in browser", "Copy key", "Transition", "Assign
 // menu; Esc leaves the list (not a cancel: browsing is the point here).
 func browseIssues(client *jira.Client, cfg *config.Config, issues []jiralib.Issue, header string) error {
 	for {
-		idx, err := fuzzyfinder.Find(issues,
-			func(i int) string { return issueRow(issues[i]) },
-			fuzzyfinder.WithHeader(header),
-			fuzzyfinder.WithPreviewWindow(func(i, w, h int) string {
-				if i < 0 {
-					return ""
-				}
-				return issuePreview(issues[i], w, h)
-			}))
-		if errors.Is(err, fuzzyfinder.ErrAbort) {
+		rows := make([]string, len(issues))
+		for i := range issues {
+			rows[i] = issueRow(issues[i])
+		}
+		idx, err := tui.Select(rows, tui.SelectOptions{
+			Header:  header,
+			MaxRows: 15,
+			Preview: func(i, w, h int) string { return issuePreview(issues[i], w, h) },
+		})
+		if tui.IsEsc(err) {
 			return nil
 		}
 		if err != nil {
@@ -293,7 +293,7 @@ func browseIssues(client *jira.Client, cfg *config.Config, issues []jiralib.Issu
 		for {
 			is := issues[idx]
 			a, err := fzfSelect(issueActions, textutil.Truncate(is.Key+": "+fieldSummary(is), 70))
-			if errors.Is(err, ErrCancelled) || (err == nil && issueActions[a] == "Back") {
+			if tui.IsEsc(err) || (err == nil && issueActions[a] == "Back") {
 				break
 			}
 			if err != nil {
@@ -301,8 +301,11 @@ func browseIssues(client *jira.Client, cfg *config.Config, issues []jiralib.Issu
 			}
 
 			changed, err := runIssueAction(client, cfg, is.Key, issueActions[a])
-			if errors.Is(err, ErrCancelled) {
+			if tui.IsEsc(err) {
 				continue
+			}
+			if errors.Is(err, ErrCancelled) {
+				return err
 			}
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)

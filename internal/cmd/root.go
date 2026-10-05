@@ -8,6 +8,7 @@ import (
 
 	"github.com/eugenetaranov/jiractl/internal/config"
 	"github.com/eugenetaranov/jiractl/internal/jira"
+	"github.com/eugenetaranov/jiractl/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -123,8 +124,11 @@ func runInteractiveMenu(cmd *cobra.Command, args []string) error {
 			header += "   (" + menuStatus + ")"
 		}
 		idx, err := fzfSelect(menuItems, header)
-		if errors.Is(err, ErrCancelled) {
+		if tui.IsEsc(err) {
 			return nil
+		}
+		if err != nil && errors.Is(err, ErrCancelled) {
+			return err
 		}
 		if err != nil {
 			return fmt.Errorf("prompt failed: %w", err)
@@ -151,6 +155,8 @@ func runInteractiveMenu(cmd *cobra.Command, args []string) error {
 
 		switch {
 		case actionErr == nil:
+		case errors.Is(actionErr, tui.ErrInterrupted):
+			return actionErr
 		case errors.Is(actionErr, ErrCancelled):
 			fmt.Fprintln(os.Stderr, "Cancelled.")
 			menuStatus = "Cancelled."

@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -11,6 +10,7 @@ import (
 	"github.com/eugenetaranov/jiractl/internal/config"
 	"github.com/eugenetaranov/jiractl/internal/jira"
 	"github.com/eugenetaranov/jiractl/internal/textutil"
+	"github.com/eugenetaranov/jiractl/internal/tui"
 )
 
 // epicLookups caches epic checks for the process, so the menu header and
@@ -130,7 +130,7 @@ func changeDefaultEpic() error {
 		labels[i] = r.label
 	}
 	idx, err := fzfSelect(labels, "Change default epic (Esc keeps "+orNone(current)+")")
-	if errors.Is(err, ErrCancelled) {
+	if tui.IsEsc(err) {
 		return nil
 	}
 	if err != nil {

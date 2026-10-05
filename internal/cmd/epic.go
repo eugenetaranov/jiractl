@@ -10,7 +10,7 @@ import (
 	"github.com/eugenetaranov/jiractl/internal/config"
 	"github.com/eugenetaranov/jiractl/internal/jira"
 	"github.com/eugenetaranov/jiractl/internal/textutil"
-	"golang.org/x/term"
+	"github.com/eugenetaranov/jiractl/internal/tui"
 )
 
 const (
@@ -18,11 +18,6 @@ const (
 	searchAgainRow = "Search again…"
 	searchAllRow   = "Search all epics…"
 )
-
-// isInteractive reports whether prompts can be shown.
-func isInteractive() bool {
-	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stderr.Fd()))
-}
 
 func epicPickLabel(epic jiralib.Issue) string {
 	label := epicLabel(epic)
@@ -65,7 +60,7 @@ func searchEpic(client *jira.Client, project string) (*jiralib.Issue, error) {
 
 		idx, err := fzfSelect(items, header)
 		switch {
-		case errors.Is(err, ErrCancelled), err == nil && idx == 0:
+		case tui.IsEsc(err), err == nil && idx == 0:
 			return nil, nil
 		case err != nil:
 			return nil, err

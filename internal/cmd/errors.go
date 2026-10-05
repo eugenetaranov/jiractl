@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/eugenetaranov/jiractl/internal/jira"
+	"github.com/eugenetaranov/jiractl/internal/tui"
 )
 
 // errorHint suggests what to do about err, or "" when there's nothing useful
@@ -40,12 +41,7 @@ func printError(title string, err error) {
 	}
 }
 
-// waitForEnter pauses so a message isn't hidden by the next full-screen picker.
+// waitForEnter pauses so a message isn't hidden by the next picker.
 func waitForEnter() {
-	rl, err := newReadline("Press Enter to return to the menu ")
-	if err != nil {
-		return
-	}
-	defer func() { _ = rl.Close() }()
-	_, _ = rl.Readline()
+	_ = tui.Pause("Press Enter to return to the menu")
 }

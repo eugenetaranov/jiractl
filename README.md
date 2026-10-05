@@ -87,7 +87,7 @@ Create a new Jira issue. Issue types, epics and field names are fetched in the b
 
 Interactively, you're asked for the summary, description and epic. The issue type is asked only when `issue_defaults.issue_type` is not set, and the epic only when `issue_defaults.epic_link` is not set.
 
-The description can have several paragraphs: finish it with a line containing only `.` (or Ctrl+D), or type `:e` on its own line to continue in `$EDITOR`.
+The description can have several paragraphs: Enter starts a new line, **Ctrl+D** finishes, and Ctrl+E continues in `$EDITOR`. Comments work the same way.
 
 Before anything is sent, every field is listed with its Jira name (`Story Points: 3`, not `customfield_10016`), followed by `Create? [Y/e/d/n]`:
 
@@ -295,13 +295,29 @@ limit = 30
 
 Unknown keys in `~/.jiractl.toml` are reported as warnings on stderr, so a typo such as `asignee` doesn't go unnoticed.
 
+## Keys
+
+Prompts and lists are drawn inline below your earlier output (on stderr), so nothing you've seen is cleared.
+
+| Key | In lists | In text prompts |
+| --- | --- | --- |
+| type | filter; space-separated words must all match | edit |
+| ↑ ↓, Ctrl+P / Ctrl+N | move | |
+| Enter | choose | accept (a new line in descriptions) |
+| Ctrl+D | | finish a description or comment |
+| Ctrl+E | | continue a description in `$EDITOR` |
+| Esc | back / skip (optional pickers) / cancel | cancel |
+| Ctrl+C | stop jiractl (exit 130) | stop jiractl (exit 130) |
+
+Colors use your terminal's own 16-color palette; set `NO_COLOR` to turn them off.
+
 ## Exit codes
 
 | Code | Meaning |
 | --- | --- |
 | 0 | Success |
 | 1 | Error (the message is printed once on stderr) |
-| 130 | Cancelled with Ctrl+C, Ctrl+D or Esc |
+| 130 | Cancelled with Ctrl+C or Esc |
 
 Warnings, progress messages and prompts go to stderr, so stdout can be piped.
 

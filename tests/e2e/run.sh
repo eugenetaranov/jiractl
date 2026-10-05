@@ -47,6 +47,7 @@ run_expect() {
   : > "$STUB_LOG"
   cat > "$WORK/s.exp" <<EXP
 set timeout 10
+set stty_init "rows 40 cols 120"
 log_file -noappend $WORK/out.log
 spawn env EDITOR=$WORK/editor.sh HOME=$home XDG_STATE_HOME=$home/state JIRACTL_TEST_USERNAME=u JIRACTL_TEST_TOKEN=t $BIN $args
 $body
@@ -69,12 +70,12 @@ out_has() { LC_ALL=C grep -a -q -E "$1" "$WORK/out.log"; }
 H=$(new_home '' '[issue_defaults]' 'issue_type = "Task"' 'epic_link = "OPS-12"' '# keep me')
 run_expect "$H" '
 expect "Summary" { send "Fix login\r" }
-expect "> " { send ".\r" }
+expect "Ctrl+D to finish" { send "\004" }
 expect "Search epics" { send "devops k8s\r" }
 expect "1 epics match" { sleep 0.5; send "OPS-40" }
 sleep 0.5
 send "\r"
-expect "default epic?" { send "y\r" }
+expect "default epic?" { send "y" }
 expect "Create?" { send "\r" }'
 if grep -q '"parent": {"key": "OPS-40"}' "$STUB_LOG" && grep -q 'epic_link = "OPS-40"' "$H/.jiractl.toml" && grep -q '# keep me' "$H/.jiractl.toml"; then
   pass "missing epic: search and pick"
@@ -86,7 +87,7 @@ fi
 H=$(new_home '' '[issue_defaults]' 'issue_type = "Task"' 'epic_link = "OPS-12"')
 run_expect "$H" '
 expect "Summary" { send "No epic\r" }
-expect "> " { send ".\r" }
+expect "Ctrl+D to finish" { send "\004" }
 expect "Search epics" { send "\r" }
 expect "open epics" { sleep 0.5; send "Skip" }
 sleep 0.5
@@ -191,20 +192,17 @@ printf '#!/bin/sh\nprintf "Edited in editor\\n\\nSecond paragraph\\n" > "$1"\n' 
 chmod +x "$WORK/editor.sh"
 run_expect "$H" '
 expect "Summary" { send "Typo summry\r" }
-expect "> " { send "First\r" }
-expect "> " { send "\r" }
-expect "> " { send "Second\r" }
-expect "> " { send ".\r" }
+expect "Ctrl+D to finish" { send "First\r\rSecond"; sleep 0.3; send "\004" }
 expect "Select epic" { sleep 0.5; send "(None)" }
 sleep 0.5
 send "\r"
 expect "Work Allocation:" {}
-expect "Create?" { send "e\r" }
+expect "Create?" { send "e" }
 expect "Edit which field" { sleep 0.5; send "Summary" }
 sleep 0.5
 send "\r"
-expect "Summary \\\[Typo" { send "Fixed summary\r" }
-expect "Create?" { send "d\r" }
+expect -ex "\[Typo summry\]" { send "Fixed summary\r" }
+expect "Create?" { send "d" }
 expect "Create?" { send "\r" }' "create"
 if python3 - "$STUB_LOG" <<'PY'
 import json, sys
@@ -365,6 +363,7 @@ fi
 H=$(new_home '[[queries]]' 'name = "mine"' 'jql = "assignee = currentUser()"')
 cat > "$WORK/s.exp" <<EXP
 set timeout 10
+set stty_init "rows 40 cols 120"
 log_file -noappend $WORK/out.log
 spawn env HOME=$H JIRACTL_TEST_USERNAME=u JIRACTL_TEST_TOKEN=bad $BIN
 expect "Jira rejected your API token" { sleep 0.5; send "Run" }

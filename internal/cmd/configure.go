@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"github.com/eugenetaranov/jiractl/internal/jira"
 	"github.com/eugenetaranov/jiractl/internal/keyring"
 	"github.com/eugenetaranov/jiractl/internal/textutil"
+	"github.com/eugenetaranov/jiractl/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -65,7 +65,7 @@ func runConfigure(cmd *cobra.Command, args []string) error {
 		switch {
 		case err == nil:
 			updated.IssueDefaults.IssueType = typeNames[idx]
-		case !errors.Is(err, ErrCancelled):
+		case !tui.IsEsc(err):
 			return err
 		}
 	}
@@ -85,7 +85,7 @@ func runConfigure(cmd *cobra.Command, args []string) error {
 			updated.IssueDefaults.EpicLink = epics[idx-1].Key
 		case err == nil:
 			updated.IssueDefaults.EpicLink = ""
-		case !errors.Is(err, ErrCancelled):
+		case !tui.IsEsc(err):
 			return err
 		}
 	}
@@ -274,7 +274,7 @@ func askProject(client *jira.Client, cfg *config.Config, current string) (string
 				header += " (current: " + current + ")"
 			}
 			idx, err := fzfSelect(items, header)
-			if errors.Is(err, ErrCancelled) && current != "" {
+			if tui.IsEsc(err) && current != "" {
 				key = current
 			} else if err != nil {
 				return "", nil, err

@@ -1,11 +1,9 @@
 package cmd
 
 import (
-	"fmt"
-	"os"
 	"time"
 
-	"golang.org/x/term"
+	"github.com/eugenetaranov/jiractl/internal/tui"
 )
 
 // pending is a value being fetched in the background. Prompts that need it
@@ -43,27 +41,8 @@ func (p *pending[T]) wait(label string) (T, error) {
 		return p.val, p.err
 	case <-time.After(spinnerDelay):
 	}
-
-	tty := term.IsTerminal(int(os.Stderr.Fd()))
-	frames := []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
-	tick := time.NewTicker(100 * time.Millisecond)
-	defer tick.Stop()
-	if !tty {
-		fmt.Fprintf(os.Stderr, "Loading %s...\n", label)
-	}
-	for i := 0; ; i++ {
-		select {
-		case <-p.done:
-			if tty {
-				fmt.Fprint(os.Stderr, "\r\033[K")
-			}
-			return p.val, p.err
-		case <-tick.C:
-			if tty {
-				fmt.Fprintf(os.Stderr, "\r%c Loading %s...", frames[i%len(frames)], label)
-			}
-		}
-	}
+	tui.Wait(label, p.done)
+	return p.val, p.err
 }
 
 // waitFor returns the value if it arrives within d; ok is false otherwise.
