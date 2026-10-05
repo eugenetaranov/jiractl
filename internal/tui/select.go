@@ -20,6 +20,12 @@ type SelectOptions struct {
 	Preview func(i, width, height int) string
 	// MaxRows caps the list height (default 12).
 	MaxRows int
+	// Check, when set, validates the chosen item asynchronously; a failure
+	// is shown under the list and another item can be picked. After
+	// MaxAttempts failures the error is returned.
+	Check       func(i int) error
+	CheckLabel  string
+	MaxAttempts int
 }
 
 // Select shows items in an inline list filtered as the user types, and
@@ -41,6 +47,8 @@ type selectModel struct {
 	items    []string
 	opts     SelectOptions
 	filter   textinput.Model
+	check    checker
+	problem  string
 	matches  []int // indices into items, in display order
 	cursor   int   // position in matches
 	offset   int   // first visible match
@@ -60,7 +68,8 @@ func newSelectModel(items []string, opts SelectOptions) *selectModel {
 	ti.Placeholder = "type to filter"
 	ti.SetWidth(40)
 	ti.Focus()
-	m := &selectModel{items: items, opts: opts, filter: ti, width: 80, height: 24, chosen: -1}
+	m := &selectModel{items: items, opts: opts, filter: ti, width: 80, height: 24, chosen: -1,
+		check: newChecker(opts.CheckLabel, opts.MaxAttempts)}
 	m.refilter()
 	return m
 }
@@ -121,6 +130,33 @@ func (m *selectModel) rows() int {
 }
 
 func (m *selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if res, ok := msg.(checkResultMsg); ok {
+		current, giveUp := m.check.result(res)
+		switch {
+		case !current:
+			return m, nil
+		case res.err == nil:
+			m.finished = true
+			return m, tea.Quit
+		case giveUp:
+			m.err, m.finished = res.err, true
+			return m, tea.Quit
+		}
+		m.problem = res.err.Error()
+		m.chosen = -1
+		return m, nil
+	}
+	if m.check.running {
+		if keyIs(msg, "ctrl+c") {
+			m.err, m.finished = ErrInterrupted, true
+			return m, tea.Quit
+		}
+		if keyIs(msg, "esc") {
+			m.err, m.finished = ErrCancelled, true
+			return m, tea.Quit
+		}
+		return m, m.check.update(msg)
+	}
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -138,7 +174,13 @@ func (m *selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.matches) == 0 {
 				return m, nil
 			}
-			m.chosen, m.finished = m.matches[m.cursor], true
+			m.chosen = m.matches[m.cursor]
+			if m.opts.Check != nil {
+				m.problem = ""
+				chosen := m.chosen
+				return m, m.check.start(func() error { return m.opts.Check(chosen) })
+			}
+			m.finished = true
 			return m, tea.Quit
 		case "up", "ctrl+p", "ctrl+k":
 			if m.cursor > 0 {
@@ -190,13 +232,22 @@ func (m *selectModel) listView(width int) string {
 		b.WriteString(styleDim.Render("  no matches") + "\n")
 	}
 	b.WriteString(styleDim.Render(fmt.Sprintf("  %d/%d", len(m.matches), len(m.items))))
+	switch {
+	case m.check.running:
+		b.WriteString("\n  " + m.check.view())
+	case m.problem != "":
+		b.WriteString("\n" + styleError.Render("  ✗ "+m.problem))
+	}
 	return b.String()
 }
 
 func (m *selectModel) View() tea.View {
 	if m.finished {
-		if m.err == nil && m.chosen >= 0 && m.opts.Header != "" {
+		switch {
+		case m.err == nil && m.chosen >= 0 && m.opts.Header != "":
 			return tea.NewView(doneLine(m.opts.Header+":", m.items[m.chosen]) + "\n")
+		case m.err != nil && !errorsIsCancel(m.err):
+			return tea.NewView(failLine(m.opts.Header+":", m.err.Error()) + "\n")
 		}
 		return tea.NewView("")
 	}

@@ -10,12 +10,12 @@
 - [x] 1.8 Remove readline and go-fuzzyfinder; `go mod tidy`
 - [x] 1.9 Update e2e expect patterns; whole suite green; teatest goldens per component
 
-## 2. Phase 2: Forms (release v0.4.0)
+## 2. Phase 2: Checked fields (release v0.4.0)
 
-- [ ] 2.1 `configure` as a Huh form: server, credentials, project, defaults; async validation with spinners; errors under fields
-- [ ] 2.2 `auth create` uses the credentials group
-- [ ] 2.3 Create review model: payload table, y/e/d/n bindings, field edit via Huh
-- [ ] 2.4 Tests: model unit tests, goldens, e2e for configure and create
+- [x] 2.1 Async `Check` (spinner, inline error, MaxAttempts) for tui.Input, tui.Secret and tui.Select; `configure` steps use it
+- [x] 2.2 `auth create` uses the same credentials step
+- [x] 2.3 `tui.Review`: payload table and y/e/d/n keys in one program; edits reuse the Phase 1 components
+- [x] 2.4 Tests: model unit tests, goldens, e2e for configure and create
 
 ## 3. Phase 3: App shell (release v0.5.0)
 

@@ -15,6 +15,12 @@ type InputOptions struct {
 	Required bool
 	// Hint is shown dimmed after the prompt, e.g. "(leave empty to keep)".
 	Hint string
+	// Check, when set, validates the answer asynchronously after Enter (e.g.
+	// against Jira). A failure is shown under the field and the user can
+	// correct it; after MaxAttempts failures the error is returned.
+	Check       func(value string) error
+	CheckLabel  string
+	MaxAttempts int
 }
 
 // Input asks for one line of text.
@@ -40,6 +46,7 @@ type inputModel struct {
 	label    string
 	opts     InputOptions
 	secret   bool
+	check    checker
 	input    textinput.Model
 	value    string
 	problem  string
@@ -56,12 +63,39 @@ func newInputModel(label string, opts InputOptions, secret bool) *inputModel {
 		ti.EchoCharacter = '•'
 	}
 	ti.Focus()
-	return &inputModel{label: label, opts: opts, secret: secret, input: ti}
+	return &inputModel{label: label, opts: opts, secret: secret, input: ti, check: newChecker(opts.CheckLabel, opts.MaxAttempts)}
 }
 
 func (m *inputModel) Init() tea.Cmd { return textinput.Blink }
 
 func (m *inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if res, ok := msg.(checkResultMsg); ok {
+		current, giveUp := m.check.result(res)
+		switch {
+		case !current:
+			return m, nil
+		case res.err == nil:
+			m.finished = true
+			return m, tea.Quit
+		case giveUp:
+			m.err, m.finished = res.err, true
+			return m, tea.Quit
+		}
+		m.problem = res.err.Error()
+		return m, nil
+	}
+	if m.check.running {
+		// Only cancelling works while Jira is being asked.
+		switch {
+		case keyIs(msg, "ctrl+c"):
+			m.err, m.finished = ErrInterrupted, true
+			return m, tea.Quit
+		case keyIs(msg, "esc"):
+			m.err, m.finished = ErrCancelled, true
+			return m, tea.Quit
+		}
+		return m, m.check.update(msg)
+	}
 	switch {
 	case keyIs(msg, "ctrl+c"):
 		m.err, m.finished = ErrInterrupted, true
@@ -78,7 +112,12 @@ func (m *inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.problem = "This field is required"
 			return m, nil
 		}
-		m.value, m.finished = v, true
+		m.value = v
+		if m.opts.Check != nil {
+			m.problem = ""
+			return m, m.check.start(func() error { return m.opts.Check(v) })
+		}
+		m.finished = true
 		return m, tea.Quit
 	}
 	if _, ok := msg.(tea.KeyPressMsg); ok {
@@ -92,6 +131,9 @@ func (m *inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *inputModel) View() tea.View {
 	if m.finished {
 		if m.err != nil {
+			if !errorsIsCancel(m.err) {
+				return tea.NewView(failLine(m.label+":", m.err.Error()) + "\n")
+			}
 			return tea.NewView("")
 		}
 		shown := m.value
@@ -111,8 +153,11 @@ func (m *inputModel) View() tea.View {
 		head += styleDim.Render(" " + m.opts.Hint)
 	}
 	s := head + " " + m.input.View()
-	if m.problem != "" {
-		s += "\n" + styleError.Render("  "+m.problem)
+	switch {
+	case m.check.running:
+		s += "\n  " + m.check.view()
+	case m.problem != "":
+		s += "\n" + styleError.Render("  ✗ "+m.problem)
 	}
 	return tea.NewView(s)
 }

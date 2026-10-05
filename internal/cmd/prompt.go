@@ -1,13 +1,6 @@
 package cmd
 
-import (
-	"bufio"
-	"fmt"
-	"os"
-	"strings"
-
-	"github.com/eugenetaranov/jiractl/internal/tui"
-)
+import "github.com/eugenetaranov/jiractl/internal/tui"
 
 // ErrCancelled is returned by every prompt and picker when the user presses
 // Esc or Ctrl+C. Execute turns it into "Cancelled." and exit 130. Callers
@@ -48,18 +41,4 @@ func promptMultilineText(label string) (string, error) {
 // promptConfirm asks a yes/no question. Enter picks the default.
 func promptConfirm(label string, defaultYes bool) (bool, error) {
 	return tui.Confirm(label, defaultYes)
-}
-
-// readSecret reads a value without echo. Without a terminal (e.g. piped
-// input) it reads one line from stdin.
-func readSecret(label string) (string, error) {
-	if !tui.IsTerminal() {
-		fmt.Fprint(os.Stderr, label)
-		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
-		if err != nil && line == "" {
-			return "", ErrCancelled
-		}
-		return strings.TrimSpace(line), nil
-	}
-	return tui.Secret(strings.TrimSuffix(strings.TrimSpace(label), ":"), tui.InputOptions{})
 }

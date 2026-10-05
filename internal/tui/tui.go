@@ -64,6 +64,15 @@ func doneLine(label, value string) string {
 	return styleDone.Render("✓") + " " + styleTitle.Render(label) + " " + value
 }
 
+// failLine is what a field that gave up leaves behind.
+func failLine(label, problem string) string {
+	return styleError.Render("✗") + " " + styleTitle.Render(label) + " " + styleError.Render(problem)
+}
+
+func errorsIsCancel(err error) bool {
+	return errors.Is(err, ErrCancelled)
+}
+
 // keyIs reports whether msg is one of the given key presses.
 func keyIs(msg tea.Msg, keys ...string) bool {
 	k, ok := msg.(tea.KeyPressMsg)

@@ -465,40 +465,16 @@ func reviewRows(draft *issueDraft, names *fieldNames, epic *jiralib.Issue, defau
 	return rows
 }
 
-func printReview(project string, rows []reviewRow) {
-	width := 0
-	for _, r := range rows {
-		width = max(width, textutil.Width(r.label))
-	}
-	var sb strings.Builder
-	sb.WriteString("\nCreating issue in " + project + ":\n")
-	for _, r := range rows {
-		lines := strings.Split(r.value, "\n")
-		const maxLines = 6
-		shown := lines
-		if len(lines) > maxLines {
-			shown = lines[:maxLines]
-		}
-		for i, line := range shown {
-			label := ""
-			if i == 0 {
-				label = r.label + ":"
-			}
-			sb.WriteString("  " + textutil.PadRight(label, width+1) + " " + line + "\n")
-		}
-		if len(lines) > maxLines {
-			fmt.Fprintf(&sb, "  %s … (%d more lines)\n", textutil.PadRight("", width+1), len(lines)-maxLines)
-		}
-	}
-	fmt.Fprint(os.Stderr, sb.String())
-}
-
 // reviewLoop shows the payload and handles Create? [Y/e/d/n]. It returns
 // false when the user answers n.
 func reviewLoop(cfg *config.Config, client *jira.Client, draft *issueDraft, pf *createPrefetch, names *fieldNames, epic **jiralib.Issue) (bool, error) {
 	for {
-		printReview(cfg.Project, reviewRows(draft, names, *epic, cfg.IssueDefaults.EpicLink))
-		choice, err := tui.Choice("Create?", "yedn")
+		rows := reviewRows(draft, names, *epic, cfg.IssueDefaults.EpicLink)
+		review := make([]tui.ReviewRow, len(rows))
+		for i, r := range rows {
+			review[i] = tui.ReviewRow{Label: r.label, Value: r.value}
+		}
+		choice, err := tui.Review("Creating issue in "+cfg.Project+":", review, "Create?", "yedn")
 		if err != nil {
 			return false, err
 		}

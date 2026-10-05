@@ -156,3 +156,99 @@ func TestSelectViewGolden(t *testing.T) {
 		})
 	}
 }
+
+// runCheck feeds the check result for a model that just started a check.
+func runCheck(t *testing.T, m tea.Model, cmd tea.Cmd) tea.Model {
+	t.Helper()
+	for cmd != nil {
+		msg := cmd()
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			for _, c := range batch {
+				if res, ok := c().(checkResultMsg); ok {
+					m, _ = m.Update(res)
+					return m
+				}
+			}
+			return m
+		}
+		m, cmd = m.Update(msg)
+	}
+	return m
+}
+
+func TestInputCheckRetriesThenGivesUp(t *testing.T) {
+	calls := 0
+	check := func(v string) error {
+		calls++
+		if v == "good" {
+			return nil
+		}
+		return errors.New("rejected")
+	}
+	m := tea.Model(newInputModel("Server", InputOptions{Check: check, MaxAttempts: 2}, false))
+	m = feed(m, "bad")
+	m, cmd := m.Update(press("enter"))
+	m = runCheck(t, m, cmd)
+	im := m.(*inputModel)
+	if im.finished || im.problem != "rejected" || !strings.Contains(im.View().Content, "✗ rejected") {
+		t.Fatalf("after first failure: finished=%v problem=%q", im.finished, im.problem)
+	}
+	// Correct the value: the check passes and the field finishes.
+	im = m.(*inputModel)
+	im.input.SetValue("good")
+	m, cmd = m.Update(press("enter"))
+	m = runCheck(t, m, cmd)
+	if im := m.(*inputModel); !im.finished || im.err != nil || im.value != "good" {
+		t.Fatalf("good value: %+v", im.err)
+	}
+
+	m = tea.Model(newInputModel("Server", InputOptions{Check: check, MaxAttempts: 2}, false))
+	for i := 0; i < 2; i++ {
+		m = feed(m, "x")
+		var cmd tea.Cmd
+		m, cmd = m.Update(press("enter"))
+		m = runCheck(t, m, cmd)
+	}
+	if im := m.(*inputModel); !im.finished || im.err == nil || im.err.Error() != "rejected" {
+		t.Fatalf("expected give-up error, got %v", im.err)
+	}
+}
+
+func TestSelectCheckStaysOnFailure(t *testing.T) {
+	m := tea.Model(newSelectModel(menu, SelectOptions{Check: func(i int) error {
+		if i == 0 {
+			return errors.New("not allowed")
+		}
+		return nil
+	}}))
+	m, cmd := m.Update(press("enter"))
+	m = runCheck(t, m, cmd)
+	if sm := m.(*selectModel); sm.finished || sm.problem != "not allowed" {
+		t.Fatalf("finished=%v problem=%q", sm.finished, sm.problem)
+	}
+	m = feed(m, "down")
+	m, cmd = m.Update(press("enter"))
+	m = runCheck(t, m, cmd)
+	if sm := m.(*selectModel); !sm.finished || sm.chosen != 1 {
+		t.Fatalf("finished=%v chosen=%d", sm.finished, sm.chosen)
+	}
+}
+
+func TestReview(t *testing.T) {
+	rows := []ReviewRow{{"Type", "Task"}, {"Summary", "Fix login"}, {"Description", "a\nb\nc\nd\ne\nf\ng\nh"}}
+	m := feed(&reviewModel{title: "Creating issue in OPS:", rows: rows, choice: choiceModel{label: "Create?", valid: "yedn"}}, "e").(*reviewModel)
+	if m.choice.chosen != 'e' || m.View().Content != "" {
+		t.Fatalf("edit: chosen=%q view=%q", m.choice.chosen, m.View().Content)
+	}
+	m = &reviewModel{title: "Creating issue in OPS:", rows: rows, choice: choiceModel{label: "Create?", valid: "yedn"}}
+	view := m.View().Content
+	for _, want := range []string{"Summary:", "Fix login", "… 2 more lines", "[Y/e/d/n]"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("view lacks %q", want)
+		}
+	}
+	m = feed(m, "enter").(*reviewModel)
+	if m.choice.chosen != 'y' || !strings.Contains(m.View().Content, "Fix login") {
+		t.Fatal("table should stay after confirming")
+	}
+}

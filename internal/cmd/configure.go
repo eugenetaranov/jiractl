@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -130,34 +131,41 @@ func normalizeServer(s string) string {
 	return s
 }
 
-// askServer asks for the server URL and checks it is a reachable Jira. It
-// returns the URL and the deployment type (cloud or server).
+// askServer asks for the server URL and checks it is a reachable Jira while
+// the field is still open. It returns the URL and the deployment type.
 func askServer(current string) (string, string, error) {
-	var lastErr error
-	for attempt := 0; attempt < maxConfigureAttempts; attempt++ {
-		input, err := promptTextWithDefault("Jira Server URL", current, true)
-		if err != nil {
+	var server string
+	var info *jira.ServerInfo
+	_, err := tui.Input("Jira Server URL", tui.InputOptions{
+		Default:     current,
+		Required:    true,
+		CheckLabel:  "Checking server",
+		MaxAttempts: maxConfigureAttempts,
+		Check: func(v string) error {
+			s := normalizeServer(v)
+			client, err := jira.NewClientWith(&config.Config{Server: s}, "", "")
+			if err == nil {
+				info, err = client.GetServerInfo()
+			}
+			if err != nil {
+				return fmt.Errorf("cannot reach Jira at %s: %w", s, err)
+			}
+			server = s
+			return nil
+		},
+	})
+	if err != nil {
+		if errors.Is(err, ErrCancelled) {
 			return "", "", err
 		}
-		server := normalizeServer(input)
-
-		client, err := jira.NewClientWith(&config.Config{Server: server}, "", "")
-		if err == nil {
-			var info *jira.ServerInfo
-			if info, err = client.GetServerInfo(); err == nil {
-				fmt.Fprintf(os.Stderr, "  Found %s %s\n", orDefault(info.DeploymentType, "Jira"), info.Version)
-				deployment := config.DeploymentCloud
-				if info.DeploymentType != "" && !strings.EqualFold(info.DeploymentType, "Cloud") {
-					deployment = config.DeploymentServer
-				}
-				return server, deployment, nil
-			}
-		}
-		lastErr = fmt.Errorf("cannot reach Jira at %s: %w", server, err)
-		fmt.Fprintf(os.Stderr, "  %v\n", lastErr)
-		current = server
+		return "", "", fmt.Errorf("server check failed %d times, nothing was saved: %w", maxConfigureAttempts, err)
 	}
-	return "", "", fmt.Errorf("server check failed %d times, nothing was saved: %w", maxConfigureAttempts, lastErr)
+	fmt.Fprintf(os.Stderr, "  Found %s %s\n", orDefault(info.DeploymentType, "Jira"), info.Version)
+	deployment := config.DeploymentCloud
+	if info.DeploymentType != "" && !strings.EqualFold(info.DeploymentType, "Cloud") {
+		deployment = config.DeploymentServer
+	}
+	return server, deployment, nil
 }
 
 // credentials are checked username/token values, saved only on request.
@@ -180,128 +188,134 @@ func (c *credentials) save() error {
 }
 
 // promptCredentials asks for username and API token and checks them against
-// the server right away. It is shared by configure and auth create.
+// the server before moving on. It is shared by configure and auth create.
+// A rejected token re-asks both values (the username may be the problem).
 func promptCredentials(cfg *config.Config) (*credentials, error) {
 	currentUsername, _ := keyring.GetUsername()
 	existingToken, _ := keyring.GetToken()
 
+	tokenName, tokenHelp := "API Token", "create one at https://id.atlassian.com/manage-profile/security/api-tokens"
+	if cfg.IsServer() {
+		tokenName, tokenHelp = "Personal Access Token", "Profile → Personal Access Tokens in Jira"
+	}
+
 	var lastErr error
-	var err error
 	for attempt := 0; attempt < maxConfigureAttempts; attempt++ {
 		// Server/Data Center authenticates with a personal access token alone.
 		username := ""
-		tokenName := "API Token"
-		if cfg.IsServer() {
-			tokenName = "Personal Access Token"
-		} else {
+		if !cfg.IsServer() {
+			var err error
 			username, err = promptTextWithDefault("Username (email)", currentUsername, true)
 			if err != nil {
 				return nil, err
 			}
 		}
 
-		label := tokenName + ": "
-		if existingToken != "" && attempt == 0 {
-			label = tokenName + " (leave empty to keep existing): "
+		opts := tui.InputOptions{Required: existingToken == "", Hint: "(" + tokenHelp + ")", CheckLabel: "Checking credentials", MaxAttempts: 1}
+		if existingToken != "" {
+			opts.Hint = "(leave empty to keep the stored one)"
 		}
-		token, err := readSecret(label)
-		if err != nil {
-			return nil, err
-		}
-		effective := token
-		if effective == "" {
-			effective = existingToken
-		}
-		if effective == "" {
-			if cfg.IsServer() {
-				fmt.Fprintln(os.Stderr, "  A personal access token is required (Profile → Personal Access Tokens in Jira)")
-			} else {
-				fmt.Fprintln(os.Stderr, "  API token is required (create one at https://id.atlassian.com/manage-profile/security/api-tokens)")
+		var client *jira.Client
+		opts.Check = func(token string) error {
+			effective := token
+			if effective == "" {
+				effective = existingToken
 			}
-			continue
+			c, err := jira.NewClientWith(cfg, username, effective)
+			if err != nil {
+				return err
+			}
+			if err := c.TestConnection(); err != nil {
+				if s := jira.StatusOf(err); s == 401 || s == 403 {
+					return fmt.Errorf("credentials rejected: %w", err)
+				}
+				return fmt.Errorf("cannot reach Jira at %s: %w", cfg.Server, err)
+			}
+			client = c
+			return nil
 		}
-
-		client, err := jira.NewClientWith(cfg, username, effective)
-		if err != nil {
-			return nil, err
-		}
-		fmt.Fprint(os.Stderr, "  Checking credentials... ")
-		err = client.TestConnection()
+		token, err := tui.Secret(tokenName, opts)
 		if err == nil {
-			fmt.Fprintln(os.Stderr, "ok")
 			return &credentials{username: username, token: token, client: client}, nil
 		}
-		fmt.Fprintln(os.Stderr, "failed")
-		switch jira.StatusOf(err) {
-		case 401, 403:
-			lastErr = fmt.Errorf("credentials rejected: %w", err)
-			fmt.Fprintf(os.Stderr, "  %v\n", lastErr)
-			currentUsername = username
-			existingToken = "" // a rejected token can't be kept
-		default:
-			return nil, fmt.Errorf("cannot reach Jira at %s: %w", cfg.Server, err)
+		if errors.Is(err, ErrCancelled) {
+			return nil, err
 		}
+		lastErr = err
+		currentUsername = username
+		existingToken = "" // a rejected token can't be kept
 	}
 	return nil, fmt.Errorf("credentials check failed %d times, nothing was saved: %w", maxConfigureAttempts, lastErr)
 }
 
 // askProject lets the user pick a project from the ones they can see, with
-// the current one listed first. Typing filters by key or name.
+// the current one listed first, and checks it while the list is open. Esc
+// keeps the current project.
 func askProject(client *jira.Client, cfg *config.Config, current string) (string, []jiralib.IssueType, error) {
+	var issueTypes []jiralib.IssueType
+	check := func(key string) error {
+		types, err := client.GetIssueTypes(key)
+		if err != nil {
+			if jira.StatusOf(err) == 404 {
+				return fmt.Errorf("project %s not found or not visible to you", key)
+			}
+			return fmt.Errorf("cannot load project %s: %w", key, err)
+		}
+		issueTypes = types
+		return nil
+	}
+
 	projects, err := client.ListProjects()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not list projects: %v\n", err)
 	}
 
-	var lastErr error
-	for attempt := 0; attempt < maxConfigureAttempts; attempt++ {
-		var key string
-		if len(projects) > 0 {
-			items := make([]string, 0, len(projects))
-			order := make([]jira.Project, 0, len(projects))
-			for _, p := range projects {
-				if strings.EqualFold(p.Key, current) {
-					order = append([]jira.Project{p}, order...)
-				} else {
-					order = append(order, p)
-				}
-			}
-			for _, p := range order {
-				items = append(items, fmt.Sprintf("%s - %s", p.Key, textutil.Truncate(p.Name, 60)))
-			}
-			header := "Select project"
-			if current != "" {
-				header += " (current: " + current + ")"
-			}
-			idx, err := fzfSelect(items, header)
-			if tui.IsEsc(err) && current != "" {
-				key = current
-			} else if err != nil {
-				return "", nil, err
-			} else {
-				key = order[idx].Key
-			}
-		} else {
-			key, err = promptTextWithDefault("Default Project Key", current, true)
-			if err != nil {
+	if len(projects) == 0 {
+		key, err := tui.Input("Default Project Key", tui.InputOptions{
+			Default: current, Required: true, CheckLabel: "Checking project", MaxAttempts: maxConfigureAttempts,
+			Check: func(v string) error { return check(strings.ToUpper(v)) },
+		})
+		if err != nil {
+			if errors.Is(err, ErrCancelled) {
 				return "", nil, err
 			}
+			return "", nil, fmt.Errorf("project check failed %d times, nothing was saved: %w", maxConfigureAttempts, err)
 		}
-		key = strings.ToUpper(strings.TrimSpace(key))
-
-		issueTypes, err := client.GetIssueTypes(key)
-		if err == nil {
-			return key, issueTypes, nil
-		}
-		if jira.StatusOf(err) == 404 {
-			lastErr = fmt.Errorf("project %s not found or not visible to you", key)
-		} else {
-			lastErr = fmt.Errorf("cannot load project %s: %w", key, err)
-		}
-		fmt.Fprintf(os.Stderr, "  %v\n", lastErr)
-		current = ""
+		return strings.ToUpper(key), issueTypes, nil
 	}
-	return "", nil, fmt.Errorf("project check failed %d times, nothing was saved: %w", maxConfigureAttempts, lastErr)
+
+	order := make([]jira.Project, 0, len(projects))
+	for _, p := range projects {
+		if strings.EqualFold(p.Key, current) {
+			order = append([]jira.Project{p}, order...)
+		} else {
+			order = append(order, p)
+		}
+	}
+	items := make([]string, len(order))
+	for i, p := range order {
+		items[i] = fmt.Sprintf("%s - %s", p.Key, textutil.Truncate(p.Name, 60))
+	}
+	header := "Select project"
+	if current != "" {
+		header += " (current: " + current + ")"
+	}
+	idx, err := tui.Select(items, tui.SelectOptions{
+		Header: header, CheckLabel: "Checking project", MaxAttempts: maxConfigureAttempts,
+		Check: func(i int) error { return check(order[i].Key) },
+	})
+	switch {
+	case tui.IsEsc(err) && current != "":
+		if err := check(strings.ToUpper(current)); err != nil {
+			return "", nil, err
+		}
+		return strings.ToUpper(current), issueTypes, nil
+	case errors.Is(err, ErrCancelled):
+		return "", nil, err
+	case err != nil:
+		return "", nil, fmt.Errorf("project check failed %d times, nothing was saved: %w", maxConfigureAttempts, err)
+	}
+	return order[idx].Key, issueTypes, nil
 }
 
 func epicLabel(epic jiralib.Issue) string {

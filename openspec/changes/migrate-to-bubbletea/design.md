@@ -48,8 +48,13 @@ Phase 1 prompts and pickers render inline with a bounded height (like `fzf --hei
 - Multiline: `textarea`. Enter inserts a newline, **Ctrl+D finishes**, and Ctrl+E opens `$EDITOR` through `tea.ExecProcess`. The `.` terminator and `:e` are dropped: a line containing only `.` is now ordinary text. Bubbles' textarea binds Ctrl+D to "delete character forward" by default, so that binding is moved to the Delete key only. The prompt hint reads `Ctrl+D to finish · Ctrl+E for $EDITOR · Esc to cancel`.
 - Cancel: Esc and Ctrl+C return `ErrCancelled`, so exit 130 behavior is unchanged. Pickers documented as optional keep "Esc = skip".
 
-### Phase 2: Huh for configure and the create review
-`configure` becomes a Huh form with groups (server → credentials → project → defaults). Validation runs in `Validate` functions, and slow checks (serverInfo, /myself, project lookup) run as commands with a spinner. Errors appear under the field instead of re-prompting. The create review becomes a model showing the payload table with key bindings `y/e/d/n`. `e` opens a Huh field for the selected row.
+### Phase 2: async checks in our own components (not Huh)
+Huh v2 runs a field's `Validate` synchronously on Enter and again on blur. A network check would freeze the form without a spinner and call Jira twice per answer. Instead, `tui.Input`, `tui.Secret` and `tui.Select` take an optional `Check` that runs as a `tea.Cmd`:
+- Enter starts the check and shows a spinner with a label ("Checking server…").
+- A failure shows the error under the field and keeps the text for correction. After `MaxAttempts` failures the component returns the error, so configure still stops after 3 failed tries and saves nothing.
+- Esc cancels and Ctrl+C stops, even while a check is running.
+
+`configure` uses these per step: server (serverInfo), credentials (/myself, re-asking the username too on rejection), and project (issue types). The create review becomes `tui.Review`: a label/value table and the `Create? [Y/e/d/n]` keys in one program. Edits reuse the Phase 1 components.
 
 ### Phase 3: one app model for menu and query browsing
 `tui.App` is a screen stack (menu → query list → actions → transition picker…) with:
@@ -76,7 +81,6 @@ Run under the expect harness: the first frame appears in ~40 ms and Esc exits in
 - [Inline rendering in small terminals] → Height is capped at `min(15, rows/2)`, and the list scrolls.
 - [Behavior drift during the swap] → Phase 1 keeps signatures and key semantics, and the whole e2e suite must pass before release.
 - [Binary size +2–4 MB] → Acceptable for a CLI distributed through Homebrew.
-- [Huh form semantics differ from sequential prompts (going back to a field)] → Desired. The tests cover the validation order.
 
 ## Migration Plan
 
