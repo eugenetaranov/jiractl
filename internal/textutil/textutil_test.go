@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/mattn/go-runewidth"
 )
 
 func TestTruncateKeepsRunesWhole(t *testing.T) {
@@ -12,8 +14,8 @@ func TestTruncateKeepsRunesWhole(t *testing.T) {
 	if !utf8.ValidString(got) {
 		t.Fatalf("invalid UTF-8: %q", got)
 	}
-	if Width(got) > 60 || !strings.HasSuffix(got, "…") {
-		t.Fatalf("got %q (width %d)", got, Width(got))
+	if runewidth.StringWidth(got) > 60 || !strings.HasSuffix(got, "…") {
+		t.Fatalf("got %q (width %d)", got, runewidth.StringWidth(got))
 	}
 }
 
@@ -25,10 +27,10 @@ func TestTruncateShortUnchanged(t *testing.T) {
 
 func TestPadRightWideChars(t *testing.T) {
 	got := PadRight("日本語", 10) // 6 columns
-	if Width(got) != 10 {
-		t.Fatalf("width %d", Width(got))
+	if runewidth.StringWidth(got) != 10 {
+		t.Fatalf("width %d", runewidth.StringWidth(got))
 	}
-	if got := PadRight("😀😀😀😀😀😀", 5); Width(got) > 5 {
-		t.Fatalf("width %d for %q", Width(got), got)
+	if got := PadRight("😀😀😀😀😀😀", 5); runewidth.StringWidth(got) > 5 {
+		t.Fatalf("width %d for %q", runewidth.StringWidth(got), got)
 	}
 }

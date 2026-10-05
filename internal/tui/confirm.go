@@ -85,39 +85,3 @@ func (m *choiceModel) View() tea.View {
 	}
 	return tea.NewView(styleTitle.Render(m.label) + " " + styleDim.Render(m.hint()) + " ")
 }
-
-// Pause waits for Enter (or Esc) so a message stays readable.
-func Pause(label string) error {
-	final, err := run(&pauseModel{label: label})
-	if err != nil {
-		return err
-	}
-	return final.(*pauseModel).err
-}
-
-type pauseModel struct {
-	label    string
-	err      error
-	finished bool
-}
-
-func (m *pauseModel) Init() tea.Cmd { return nil }
-
-func (m *pauseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch {
-	case keyIs(msg, "ctrl+c"):
-		m.err, m.finished = ErrInterrupted, true
-		return m, tea.Quit
-	case keyIs(msg, "enter", "esc", "space", "q"):
-		m.finished = true
-		return m, tea.Quit
-	}
-	return m, nil
-}
-
-func (m *pauseModel) View() tea.View {
-	if m.finished {
-		return tea.NewView("")
-	}
-	return tea.NewView(styleDim.Render(m.label))
-}

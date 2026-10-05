@@ -297,3 +297,31 @@ func TestSearchFixedRowFirst(t *testing.T) {
 		t.Fatalf("result %+v", m.result)
 	}
 }
+
+func TestViewsGolden(t *testing.T) {
+	search := newSearchModel(SearchOptions{Header: "Search epics", Fixed: []string{"Skip: create without epic"}, Search: func(string) ([]string, error) { return nil, nil }})
+	search.Update(searchResultMsg{seq: 0, query: "", items: []string{"OPS-40 - DevOps k8s cluster upgrade", "OPS-41 - Billing revamp [done]"}})
+
+	inputWithError := newInputModel("Jira Server URL", InputOptions{Default: "https://acme.atlassian.net"}, false)
+	inputWithError.problem = "cannot reach Jira at https://acme.atlassian.net: no such host"
+
+	app := &app{stack: []Screen{newFake("Select action")}, width: 80, height: 12,
+		header: "Default epic: OPS-40 DevOps k8s cluster upgrade",
+		status: statusMsg{text: "Jira rejected your credentials (401)", hint: "Create a new API token", isErr: true}}
+
+	views := map[string]string{
+		"input":       newInputModel("Summary", InputOptions{Required: true}, false).View().Content,
+		"input_error": inputWithError.View().Content,
+		"secret":      newInputModel("API Token", InputOptions{Hint: "(leave empty to keep the stored one)"}, true).View().Content,
+		"choice":      (&choiceModel{label: "Create?", valid: "yedn"}).View().Content,
+		"textarea":    newTextareaModel("Description", "First\n\nSecond").View().Content,
+		"review":      (&reviewModel{title: "Creating issue in OPS:", rows: []ReviewRow{{"Type", "Task"}, {"Summary", "Fix login"}, {"Epic", "OPS-40 - DevOps k8s (default)"}}, choice: choiceModel{label: "Create?", valid: "yedn"}}).View().Content,
+		"search":      search.View().Content,
+		"app_menu":    app.View().Content,
+	}
+	for name, view := range views {
+		t.Run(name, func(t *testing.T) {
+			golden.RequireEqual(t, []byte(view))
+		})
+	}
+}

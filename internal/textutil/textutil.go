@@ -23,11 +23,6 @@ func PadRight(s string, cols int) string {
 	return runewidth.FillRight(Truncate(s, cols), cols)
 }
 
-// Width returns the display width of s.
-func Width(s string) int {
-	return runewidth.StringWidth(s)
-}
-
 // Wrap breaks s into lines of at most cols display columns, keeping existing
 // line breaks.
 func Wrap(s string, cols int) []string {

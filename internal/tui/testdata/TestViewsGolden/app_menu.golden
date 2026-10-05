@@ -1,0 +1,12 @@
+[2mDefault epic: OPS-40 DevOps k8s cluster upgrade[m
+[1mSelect action[m                                                                  
+[37m> [m[7;37mt[m[38;5;240mype to filter[m[38;5;240m                                                               [m
+[1;36m❯ [m[1mpush[m                                                                         
+  status                                                                       
+  fail                                                                         
+[2m  3/3[m                                                                          
+                                                                               
+                                                                               
+[31m✗ Jira rejected your credentials (401)[m
+[2m  → Create a new API token[m
+[2m↑↓ move · type to filter · enter choose · esc back · ctrl+c quit[m

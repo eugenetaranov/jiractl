@@ -28,6 +28,6 @@
 
 ## 4. Phase 4: Cleanup (v0.5.x)
 
-- [ ] 4.1 Delete unused helpers; teatest goldens for every screen
-- [ ] 4.2 README: keys, screenshots or asciinema, NO_COLOR
-- [ ] 4.3 Close the open question on colors
+- [x] 4.1 Delete unused helpers (tui.Pause, textutil.Width); golden views for every component and the app frame
+- [x] 4.2 README: keys, app layout, live epic search, NO_COLOR (verified); screenshots left out
+- [x] 4.3 Close the open question on colors: the terminal's 16 ANSI colors

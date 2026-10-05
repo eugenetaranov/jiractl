@@ -86,6 +86,7 @@ Run under the expect harness: the first frame appears in ~40 ms and Esc exits in
 
 Each phase is one PR, one commit and one release (v0.3.0, v0.4.0, v0.5.0, then v0.5.x for cleanup). Rolling back means reverting that phase's commit. Config and data formats don't change, so mixed versions are safe.
 
-## Open Questions
+## Resolved Questions
 
-- Colors: a fixed palette, or follow the terminal's ANSI colors only (safer with odd themes)? The current proposal is ANSI 16 colors only.
+- Multiline input: Ctrl+D finishes, Ctrl+E opens `$EDITOR`. The `.` terminator was dropped.
+- Colors: the terminal's 16 ANSI colors only, so jiractl follows the user's theme. `NO_COLOR` turns them off (Bubble Tea's color-profile detection).
