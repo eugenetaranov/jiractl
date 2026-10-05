@@ -3,8 +3,14 @@
 Every create, transition, assign and comment request is appended to $STUB_LOG
 as one JSON line: {"method", "path", "body"}. Searches append {"jql": ...}.
 The token "bad" is rejected with 401.
+
+With STUB_DEPLOYMENT=Server the stub behaves like Jira Data Center: bearer
+(personal access token) auth, v2 search with plain-text descriptions, and an
+Epic Link custom field instead of parent on the create screen.
 """
 import base64, http.server, json, os, sys, urllib.parse
+
+SERVER = os.environ.get("STUB_DEPLOYMENT", "Cloud") == "Server"
 
 EPICS = {
     "OPS-40": {"key": "OPS-40", "fields": {"summary": "DevOps k8s cluster upgrade", "issuetype": {"name": "Epic"}}},
@@ -38,6 +44,8 @@ class H(http.server.BaseHTTPRequestHandler):
 
     def token(self):
         auth = self.headers.get("Authorization", "")
+        if SERVER:
+            return auth[7:] if auth.startswith("Bearer ") else "bad"
         if not auth.startswith("Basic "):
             return None
         return base64.b64decode(auth[6:]).decode().split(":", 1)[1]
@@ -46,6 +54,8 @@ class H(http.server.BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(u.query)
         if u.path == "/rest/api/2/serverInfo":
+            if SERVER:
+                return self.send(200, {"version": "9.12.0", "deploymentType": "Server", "baseUrl": "http://stub"})
             return self.send(200, {"version": "1001.0.0", "deploymentType": "Cloud", "baseUrl": "http://stub"})
         if self.token() == "bad":
             return self.send(401)
@@ -69,7 +79,14 @@ class H(http.server.BaseHTTPRequestHandler):
         if u.path == "/rest/api/2/issue/createmeta/OPS/issuetypes":
             return self.send(200, {"issueTypes": [{"id": "1", "name": "Task"}, {"id": "2", "name": "Bug"}]})
         if u.path.startswith("/rest/api/2/issue/createmeta/OPS/issuetypes/"):
-            return self.send(200, {"fields": [{"fieldId": "summary", "name": "Summary", "required": True}]})
+            if SERVER:
+                return self.send(200, {"values": [
+                    {"fieldId": "summary", "name": "Summary", "required": True},
+                    {"fieldId": "customfield_10014", "name": "Epic Link",
+                     "schema": {"custom": "com.pyxis.greenhopper.jira:gh-epic-link"}}]})
+            return self.send(200, {"fields": [
+                {"fieldId": "summary", "name": "Summary", "required": True},
+                {"fieldId": "parent", "name": "Parent"}]})
         if u.path.endswith("/transitions"):
             return self.send(200, {"transitions": [{"id": "21", "name": "Start", "to": {"name": "In Progress"}}]})
         if u.path.startswith("/rest/api/2/issue/"):
@@ -77,7 +94,7 @@ class H(http.server.BaseHTTPRequestHandler):
             if key in EPICS:
                 return self.send(200, EPICS[key])
             return self.send(404, {"errorMessages": ["Issue does not exist or you do not have permission to see it."]})
-        if u.path == "/rest/api/3/search/jql":
+        if u.path == ("/rest/api/2/search" if SERVER else "/rest/api/3/search/jql"):
             jql = q.get("jql", [""])[0]
             log({"jql": jql})
             low = jql.lower()
@@ -87,6 +104,10 @@ class H(http.server.BaseHTTPRequestHandler):
                 return self.send(200, {"issues": list(EPICS.values())})
             if "bad" in low:
                 return self.send(400, {"errorMessages": ["Error in the JQL Query: 'bad' is not a field."]})
+            if SERVER:
+                plain = json.loads(json.dumps(TASKS))
+                plain[0]["fields"]["description"] = "Login fails on Safari."
+                return self.send(200, {"issues": plain})
             return self.send(200, {"issues": TASKS})
         self.send(404, {"errorMessages": ["no stub for " + u.path]})
 

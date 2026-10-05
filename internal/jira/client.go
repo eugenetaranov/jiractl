@@ -27,6 +27,14 @@ type Client struct {
 
 	selfMu sync.Mutex
 	self   *jira.User
+
+	epicMu     sync.Mutex
+	epicFields map[string]string // project/issue type -> epic field
+}
+
+// IsServer reports whether the client talks to Jira Server/Data Center.
+func (c *Client) IsServer() bool {
+	return c.config.IsServer()
 }
 
 // NewClient creates a new Jira client using credentials from keyring and config
@@ -36,7 +44,8 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		return nil, fmt.Errorf("failed to get credentials: %w", err)
 	}
 
-	if username == "" || token == "" {
+	// Server/Data Center uses a personal access token; no username needed.
+	if token == "" || (username == "" && !cfg.IsServer()) {
 		return nil, fmt.Errorf("credentials not configured, run 'jiractl configure' first")
 	}
 
@@ -57,7 +66,12 @@ const requestTimeout = 30 * time.Second
 // GetServerInfo.
 func NewClientWith(cfg *config.Config, username, token string) (*Client, error) {
 	httpClient := http.DefaultClient
-	if username != "" || token != "" {
+	switch {
+	case cfg.IsServer() && token != "":
+		// Server/Data Center: personal access token as a bearer token.
+		tp := jira.BearerAuthTransport{Token: strings.TrimSpace(token)}
+		httpClient = tp.Client()
+	case username != "" || token != "":
 		tp := jira.BasicAuthTransport{
 			Username: strings.TrimSpace(username),
 			Password: strings.TrimSpace(token),
@@ -73,9 +87,10 @@ func NewClientWith(cfg *config.Config, username, token string) (*Client, error) 
 	}
 
 	return &Client{
-		Client:    client,
-		config:    cfg,
-		accountID: map[string]string{},
+		Client:     client,
+		config:     cfg,
+		accountID:  map[string]string{},
+		epicFields: map[string]string{},
 	}, nil
 }
 
@@ -83,15 +98,17 @@ func NewClientWith(cfg *config.Config, username, token string) (*Client, error) 
 // config defaults, drafts, flags and prompts, so what the review screen shows
 // is exactly what gets sent.
 type NewIssue struct {
-	Project     string
-	Type        string
-	Summary     string
-	Description string
-	EpicLink    string
-	AccountID   string // assignee
-	Component   string
-	Labels      []string
-	Fields      map[string]string // custom field ID -> raw value
+	Project      string
+	Type         string
+	Summary      string
+	Description  string
+	EpicLink     string
+	EpicField    string // "parent" (default) or the Epic Link custom field ID
+	AccountID    string // assignee on Cloud
+	AssigneeName string // assignee on Server/Data Center
+	Component    string
+	Labels       []string
+	Fields       map[string]string // custom field ID -> raw value
 }
 
 // parseCustomFieldValue interprets a config string as JSON when it looks like
@@ -125,9 +142,15 @@ func (c *Client) CreateIssue(n *NewIssue) (*jira.Issue, error) {
 		issue.Fields.Components = []*jira.Component{{Name: n.Component}}
 	}
 	if n.EpicLink != "" {
-		// Team-managed projects (and Jira Cloud generally) link epics through
-		// the parent field.
-		issue.Fields.Parent = &jira.Parent{Key: n.EpicLink}
+		if n.EpicField == "" || n.EpicField == "parent" {
+			issue.Fields.Parent = &jira.Parent{Key: n.EpicLink}
+		} else {
+			// Classic projects on Server/Data Center: the Epic Link field.
+			issue.Fields.Unknowns[n.EpicField] = n.EpicLink
+		}
+	}
+	if n.AssigneeName != "" {
+		issue.Fields.Unknowns["assignee"] = map[string]string{"name": n.AssigneeName}
 	}
 	if n.AccountID != "" {
 		// Sent as a raw field: go-jira's User type always serializes an
@@ -170,15 +193,20 @@ func (c *Client) GetFields() ([]Field, error) {
 // list and the preview pane without fetching each issue.
 const searchFields = "key,summary,status,assignee,reporter,priority,issuetype,labels,description,created,updated,resolution"
 
-// SearchIssues searches for issues using JQL via the v3 API
+// SearchIssues searches for issues using JQL
 func (c *Client) SearchIssues(jql string, maxResults int) ([]jira.Issue, error) {
 	if maxResults <= 0 {
 		maxResults = 50
 	}
 
-	// Use the v3 search/jql endpoint
+	// Cloud: the v3 search/jql endpoint. Server/Data Center: v2 search.
+	path := "rest/api/3/search/jql"
+	if c.IsServer() {
+		path = "rest/api/2/search"
+	}
 	apiEndpoint := fmt.Sprintf(
-		"rest/api/3/search/jql?jql=%s&maxResults=%d&fields=%s",
+		"%s?jql=%s&maxResults=%d&fields=%s",
+		path,
 		url.QueryEscape(jql),
 		maxResults,
 		searchFields,

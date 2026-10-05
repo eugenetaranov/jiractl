@@ -8,7 +8,7 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 WORK=$(mktemp -d)
-trap 'kill $STUB_PID 2>/dev/null || true; rm -rf "$WORK"' EXIT
+trap 'kill $STUB_PID $DC_PID 2>/dev/null || true; rm -rf "$WORK"' EXIT
 
 PORT=${PORT:-18799}
 BIN=$WORK/jiractl
@@ -17,6 +17,9 @@ go build -tags keyringmock -o "$BIN" "$ROOT/cmd/jiractl"
 export STUB_LOG=$WORK/creates.log
 python3 "$ROOT/tests/e2e/stub.py" "$PORT" &
 STUB_PID=$!
+DC_PORT=$((PORT + 1))
+STUB_DEPLOYMENT=Server python3 "$ROOT/tests/e2e/stub.py" "$DC_PORT" &
+DC_PID=$!
 sleep 0.5
 
 FAILED=0
@@ -324,6 +327,36 @@ assert r["queries"]["status"] == "fail" and "broken:" in r["queries"]["detail"],
   pass "doctor"
 else
   fail "doctor" "exit=$EXIT1/$EXIT2/$EXIT3 $OUT | $OUT3"
+fi
+
+# --- Data Center: detected on setup, PAT only, Epic Link field, v2 search
+H=$(mktemp -d "$WORK/home.XXXX")
+run_expect "$H" '
+expect "Server URL" { send "http://127.0.0.1:'"$DC_PORT"'\r" }
+expect "Found Server" {}
+expect "Personal Access Token" { send "pat\r" }
+expect "Select project" { sleep 0.5; send "OPS" }
+sleep 0.5
+send "\r"
+expect "default issue type" { sleep 0.5; send "Task" }
+sleep 0.5
+send "\r"
+expect "default epic" { sleep 0.5; send "OPS-40" }
+sleep 0.5
+send "\r"
+expect "Checking setup" {}' configure
+: > "$STUB_LOG"
+set +e
+KEY=$(HOME=$H JIRACTL_TEST_TOKEN=pat "$BIN" create -s "DC issue" -y 2>"$WORK/err")
+EXIT2=$?
+KEYS=$(HOME=$H JIRACTL_TEST_TOKEN=pat "$BIN" query mine -o keys 2>/dev/null)
+set -e
+if grep -q 'deployment = "server"' "$H/.jiractl.toml" && [ "$EXIT2" = 0 ] && [ "$KEY" = OPS-99 ] &&
+   grep '"path": "/rest/api/2/issue"' "$STUB_LOG" | grep -q '"customfield_10014": "OPS-40"' &&
+   [ "$(echo $KEYS)" = "OPS-1 OPS-2" ]; then
+  pass "data center: setup, create, query"
+else
+  fail "data center: setup, create, query" "exit=$EXIT2 key=$KEY keys=$KEYS $(cat "$WORK/err") $(cat "$H/.jiractl.toml")"
 fi
 
 exit $FAILED

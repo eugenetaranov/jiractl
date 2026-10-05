@@ -270,6 +270,17 @@ jql = "project = ${project} AND due <= endOfWeek() AND due >= startOfDay() AND s
 limit = 30
 ```
 
+### Jira Server / Data Center
+
+`configure` detects the deployment type from the server and stores it as `deployment = "server"` (or `"cloud"`; a config without the key is treated as Cloud). On Server/Data Center (8.14+):
+
+- you sign in with a **personal access token** (Profile → Personal Access Tokens); no username is needed,
+- searches use `/rest/api/2/search`,
+- `issue_defaults.assignee` is sent as a username,
+- epics are linked through `parent` when the create screen has it, otherwise through the Epic Link custom field (`com.pyxis.greenhopper.jira:gh-epic-link`). Set `issue_defaults.epic_field` to force either (`"parent"` or the field ID, e.g. `"customfield_10014"`). If neither is available, the issue is created without an epic and a warning says why.
+
+`jiractl doctor` warns when the server's actual type doesn't match `deployment` in the config.
+
 ### Query Variables
 
 - `${project}` - Replaced with the configured project key

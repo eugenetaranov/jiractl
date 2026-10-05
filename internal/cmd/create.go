@@ -91,7 +91,7 @@ func startPrefetch(cfg *config.Config, client *jira.Client, epicKey, assignee st
 	if epicKey != "" {
 		pf.defaultEpic = lookupEpic(client, epicKey)
 	}
-	if assignee != "" {
+	if assignee != "" && !cfg.IsServer() {
 		pf.assignee = fetch(func() (string, error) { return client.ResolveAccountID(assignee) })
 	}
 	return pf
@@ -394,7 +394,18 @@ func buildPayload(cfg *config.Config, client *jira.Client, draft *issueDraft, pf
 		Labels:      draft.Labels,
 		Fields:      draft.Fields,
 	}
-	if draft.Assignee != "" {
+	if draft.EpicLink != "" {
+		n.EpicField = client.EpicField(cfg.Project, draft.IssueType)
+		if n.EpicField == "" {
+			fmt.Fprintf(os.Stderr, "Warning: %s issues in %s have no parent or Epic Link field; creating without epic %s (set issue_defaults.epic_field to override)\n",
+				draft.IssueType, cfg.Project, draft.EpicLink)
+			n.EpicLink = ""
+		}
+	}
+	if draft.Assignee != "" && cfg.IsServer() {
+		// Server/Data Center identifies users by username.
+		n.AssigneeName = draft.Assignee
+	} else if draft.Assignee != "" {
 		var id string
 		var err error
 		if draft.Assignee == cfg.IssueDefaults.Assignee {

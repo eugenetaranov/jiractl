@@ -35,6 +35,7 @@ func (c *Client) MyPermissions(project string, perms []string) (map[string]bool,
 type CreateField struct {
 	ID            string
 	Name          string
+	Custom        string // schema custom type, e.g. com.pyxis.greenhopper.jira:gh-epic-link
 	Required      bool
 	HasDefault    bool
 	AllowedValues []string // value or name of each option, when the field is a list
@@ -70,6 +71,9 @@ func (c *Client) CreateMetaFields(project, issueType string) ([]CreateField, err
 		Required      bool              `json:"required"`
 		HasDefault    bool              `json:"hasDefaultValue"`
 		AllowedValues []json.RawMessage `json:"allowedValues"`
+		Schema        struct {
+			Custom string `json:"custom"`
+		} `json:"schema"`
 	}
 	var fields struct {
 		Fields []rawField `json:"fields"`
@@ -81,7 +85,7 @@ func (c *Client) CreateMetaFields(project, issueType string) ([]CreateField, err
 
 	var out []CreateField
 	for _, f := range append(fields.Fields, fields.Values...) {
-		cf := CreateField{ID: f.FieldID, Name: f.Name, Required: f.Required, HasDefault: f.HasDefault}
+		cf := CreateField{ID: f.FieldID, Name: f.Name, Custom: f.Schema.Custom, Required: f.Required, HasDefault: f.HasDefault}
 		if cf.ID == "" {
 			cf.ID = f.Key
 		}

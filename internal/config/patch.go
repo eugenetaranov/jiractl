@@ -41,11 +41,13 @@ func patchConfig(text string, desired *Config) (string, bool) {
 	}
 
 	str("", "server", current.Server, desired.Server)
+	str("", "deployment", current.Deployment, desired.Deployment)
 	str("", "project", current.Project, desired.Project)
 	cd, dd := current.IssueDefaults, desired.IssueDefaults
 	str("issue_defaults", "assignee", cd.Assignee, dd.Assignee)
 	str("issue_defaults", "component", cd.Component, dd.Component)
 	str("issue_defaults", "epic_link", cd.EpicLink, dd.EpicLink)
+	str("issue_defaults", "epic_field", cd.EpicField, dd.EpicField)
 	str("issue_defaults", "issue_type", cd.IssueType, dd.IssueType)
 	if !equalStrings(cd.Labels, dd.Labels) {
 		if len(dd.Labels) == 0 {

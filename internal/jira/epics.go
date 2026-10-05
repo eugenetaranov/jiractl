@@ -111,3 +111,37 @@ func IsEpicRejection(err error) bool {
 	}
 	return false
 }
+
+const epicLinkType = "com.pyxis.greenhopper.jira:gh-epic-link"
+
+// EpicField returns how to link an epic for issues of issueType in project:
+// "parent", the ID of the Epic Link custom field, or "" when the create screen
+// has neither. issue_defaults.epic_field overrides detection. If the create
+// screen can't be read, "parent" is assumed.
+func (c *Client) EpicField(project, issueType string) string {
+	if f := c.config.IssueDefaults.EpicField; f != "" {
+		return f
+	}
+	cacheKey := project + "/" + strings.ToLower(issueType)
+	c.epicMu.Lock()
+	defer c.epicMu.Unlock()
+	if f, ok := c.epicFields[cacheKey]; ok {
+		return f
+	}
+
+	field := "parent"
+	if fields, err := c.CreateMetaFields(project, issueType); err == nil {
+		field = ""
+		for _, f := range fields {
+			if f.ID == "parent" {
+				field = "parent"
+				break
+			}
+			if f.Custom == epicLinkType {
+				field = f.ID
+			}
+		}
+	}
+	c.epicFields[cacheKey] = field
+	return field
+}

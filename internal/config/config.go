@@ -15,9 +15,12 @@ const (
 )
 
 type IssueDefaults struct {
-	Assignee     string            `toml:"assignee,omitempty"`
-	Component    string            `toml:"component,omitempty"`
-	EpicLink     string            `toml:"epic_link,omitempty"`
+	Assignee  string `toml:"assignee,omitempty"`
+	Component string `toml:"component,omitempty"`
+	EpicLink  string `toml:"epic_link,omitempty"`
+	// EpicField overrides how the epic is linked: "parent" or the ID of the
+	// Epic Link custom field. Detected from the create screen when empty.
+	EpicField    string            `toml:"epic_field,omitempty"`
 	IssueType    string            `toml:"issue_type,omitempty"`
 	Labels       []string          `toml:"labels,omitempty"`
 	CustomFields map[string]string `toml:"custom_fields,omitempty"`
@@ -29,8 +32,15 @@ type Query struct {
 	Limit int    `toml:"limit,omitempty"`
 }
 
+// Deployment values; an empty Deployment means DeploymentCloud.
+const (
+	DeploymentCloud  = "cloud"
+	DeploymentServer = "server" // Server or Data Center
+)
+
 type Config struct {
 	Server        string        `toml:"server"`
+	Deployment    string        `toml:"deployment,omitempty"`
 	Project       string        `toml:"project"`
 	IssueDefaults IssueDefaults `toml:"issue_defaults,omitempty"`
 	Queries       []Query       `toml:"queries,omitempty"`
@@ -185,6 +195,11 @@ func writeAtomic(path string, data []byte) error {
 		return err
 	}
 	return nil
+}
+
+// IsServer reports whether the instance is Jira Server or Data Center.
+func (c *Config) IsServer() bool {
+	return c.Deployment == DeploymentServer
 }
 
 // ExpandJQL replaces ${project} placeholder with the actual project key

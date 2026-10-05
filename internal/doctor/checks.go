@@ -124,8 +124,11 @@ func checkCreds(ctx *Ctx) Result {
 		return fail("no username or API token in the system keyring", configureHint)
 	case ctx.Token == "":
 		return fail("no API token in the system keyring", configureHint)
-	case ctx.Username == "":
+	case ctx.Username == "" && !(ctx.Cfg != nil && ctx.Cfg.IsServer()):
 		return fail("no username in the system keyring", configureHint)
+	}
+	if ctx.Username == "" {
+		return ok("personal access token")
 	}
 	return ok(ctx.Username)
 }
@@ -142,7 +145,17 @@ func checkServer(ctx *Ctx) Result {
 	if err != nil {
 		return fail(fmt.Sprintf("%s: %v", ctx.Cfg.Server, err), "check 'server' in ~/"+config.ConfigFileName+" and your network")
 	}
-	return ok(strings.TrimSpace(fmt.Sprintf("%s %s %s", ctx.Cfg.Server, info.DeploymentType, info.Version)))
+	detail := strings.TrimSpace(fmt.Sprintf("%s %s %s", ctx.Cfg.Server, info.DeploymentType, info.Version))
+	isServer := info.DeploymentType != "" && !strings.EqualFold(info.DeploymentType, "Cloud")
+	if isServer != ctx.Cfg.IsServer() {
+		configured := config.DeploymentCloud
+		if ctx.Cfg.IsServer() {
+			configured = config.DeploymentServer
+		}
+		return warn(fmt.Sprintf("%s, but the config says deployment = %q", detail, configured),
+			"run 'jiractl configure' to switch the authentication and APIs used")
+	}
+	return ok(detail)
 }
 
 func checkAuth(ctx *Ctx) Result {
@@ -254,6 +267,9 @@ func checkDefaultAssignee(ctx *Ctx) Result {
 	want := ctx.Cfg.IssueDefaults.Assignee
 	if want == "" {
 		return ok("not set")
+	}
+	if ctx.Cfg.IsServer() {
+		return ok(want + " (username)")
 	}
 	id, err := ctx.Client.ResolveAccountID(want)
 	if err != nil {

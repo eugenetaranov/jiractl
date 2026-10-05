@@ -112,7 +112,7 @@ func runAuthCreate(cmd *cobra.Command, args []string) error {
 
 	serverChanged := false
 	if cfg.Server == "" {
-		if cfg.Server, err = askServer(""); err != nil {
+		if cfg.Server, cfg.Deployment, err = askServer(""); err != nil {
 			return err
 		}
 		serverChanged = true

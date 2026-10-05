@@ -37,11 +37,12 @@ func runConfigure(cmd *cobra.Command, args []string) error {
 	// Work on a copy; nothing is written until every step passed.
 	updated := *cfg
 
-	server, err := askServer(cfg.Server)
+	server, deployment, err := askServer(cfg.Server)
 	if err != nil {
 		return err
 	}
 	updated.Server = server
+	updated.Deployment = deployment
 
 	creds, err := promptCredentials(&updated)
 	if err != nil {
@@ -129,13 +130,14 @@ func normalizeServer(s string) string {
 	return s
 }
 
-// askServer asks for the server URL and checks it is a reachable Jira.
-func askServer(current string) (string, error) {
+// askServer asks for the server URL and checks it is a reachable Jira. It
+// returns the URL and the deployment type (cloud or server).
+func askServer(current string) (string, string, error) {
 	var lastErr error
 	for attempt := 0; attempt < maxConfigureAttempts; attempt++ {
 		input, err := promptTextWithDefault("Jira Server URL", current, true)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		server := normalizeServer(input)
 
@@ -144,14 +146,18 @@ func askServer(current string) (string, error) {
 			var info *jira.ServerInfo
 			if info, err = client.GetServerInfo(); err == nil {
 				fmt.Fprintf(os.Stderr, "  Found %s %s\n", orDefault(info.DeploymentType, "Jira"), info.Version)
-				return server, nil
+				deployment := config.DeploymentCloud
+				if info.DeploymentType != "" && !strings.EqualFold(info.DeploymentType, "Cloud") {
+					deployment = config.DeploymentServer
+				}
+				return server, deployment, nil
 			}
 		}
 		lastErr = fmt.Errorf("cannot reach Jira at %s: %w", server, err)
 		fmt.Fprintf(os.Stderr, "  %v\n", lastErr)
 		current = server
 	}
-	return "", fmt.Errorf("server check failed %d times, nothing was saved: %w", maxConfigureAttempts, lastErr)
+	return "", "", fmt.Errorf("server check failed %d times, nothing was saved: %w", maxConfigureAttempts, lastErr)
 }
 
 // credentials are checked username/token values, saved only on request.
@@ -180,15 +186,23 @@ func promptCredentials(cfg *config.Config) (*credentials, error) {
 	existingToken, _ := keyring.GetToken()
 
 	var lastErr error
+	var err error
 	for attempt := 0; attempt < maxConfigureAttempts; attempt++ {
-		username, err := promptTextWithDefault("Username (email)", currentUsername, true)
-		if err != nil {
-			return nil, err
+		// Server/Data Center authenticates with a personal access token alone.
+		username := ""
+		tokenName := "API Token"
+		if cfg.IsServer() {
+			tokenName = "Personal Access Token"
+		} else {
+			username, err = promptTextWithDefault("Username (email)", currentUsername, true)
+			if err != nil {
+				return nil, err
+			}
 		}
 
-		label := "API Token: "
+		label := tokenName + ": "
 		if existingToken != "" && attempt == 0 {
-			label = "API Token (leave empty to keep existing): "
+			label = tokenName + " (leave empty to keep existing): "
 		}
 		token, err := readSecret(label)
 		if err != nil {
@@ -199,7 +213,11 @@ func promptCredentials(cfg *config.Config) (*credentials, error) {
 			effective = existingToken
 		}
 		if effective == "" {
-			fmt.Fprintln(os.Stderr, "  API token is required (create one at https://id.atlassian.com/manage-profile/security/api-tokens)")
+			if cfg.IsServer() {
+				fmt.Fprintln(os.Stderr, "  A personal access token is required (Profile → Personal Access Tokens in Jira)")
+			} else {
+				fmt.Fprintln(os.Stderr, "  API token is required (create one at https://id.atlassian.com/manage-profile/security/api-tokens)")
+			}
 			continue
 		}
 

@@ -228,3 +228,17 @@ func TestUnknownKeysWarn(t *testing.T) {
 		t.Fatalf("no warning: %q", buf[:n])
 	}
 }
+
+func TestPatchDeploymentAndEpicField(t *testing.T) {
+	want := decode(t, sample)
+	want.Deployment = DeploymentServer
+	want.IssueDefaults.EpicField = "customfield_10014"
+	out, ok := patchConfig(sample, &want)
+	if !ok {
+		t.Fatal("patch failed")
+	}
+	got := decode(t, out)
+	if !got.IsServer() || got.IssueDefaults.EpicField != "customfield_10014" || !strings.Contains(out, "# team board") {
+		t.Fatalf("got:\n%s", out)
+	}
+}
