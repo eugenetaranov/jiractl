@@ -13,7 +13,10 @@ import (
 func errorHint(err error) string {
 	var netErr net.Error
 	var urlErr *url.Error
+	var upErr *upgradeError
 	switch {
+	case errors.As(err, &upErr):
+		return upErr.hint
 	case errors.Is(err, ErrNotConfigured):
 		return ""
 	case jira.StatusOf(err) == 401:

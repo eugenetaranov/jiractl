@@ -185,6 +185,16 @@ jiractl auth delete  # Remove credentials
 jiractl auth test    # Check config, credentials, server and authentication
 ```
 
+### `jiractl version` / `jiractl upgrade`
+
+```bash
+jiractl version          # Show the version and whether a newer release exists
+jiractl upgrade          # Upgrade to the latest release (same as 'jiractl version upgrade')
+jiractl upgrade --force  # Reinstall, or replace a development build
+```
+
+A Homebrew install refreshes the `eugenetaranov/tap` tap and runs `brew upgrade`; if the formula hasn't caught up with a release that was just published, it says so and you can retry shortly. Any other install downloads the release archive for your platform, verifies it against the release's `checksums.txt` and replaces the running binary (rerun with `sudo` if its directory isn't writable).
+
 ## Configuration
 
 Configuration is stored in `~/.jiractl.toml`. Credentials are stored securely in the system keyring.
