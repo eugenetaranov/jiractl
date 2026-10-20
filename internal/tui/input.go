@@ -5,6 +5,7 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // InputOptions configures Input and Secret.
@@ -69,6 +70,11 @@ func newInputModel(label string, opts InputOptions, secret bool) *inputModel {
 func (m *inputModel) Init() tea.Cmd { return textinput.Blink }
 
 func (m *inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if ws, ok := msg.(tea.WindowSizeMsg); ok {
+		// The field takes the rest of the line after the prompt.
+		m.input.SetWidth(max(ws.Width-lipgloss.Width(m.head())-2, 20))
+		return m, nil
+	}
 	if res, ok := msg.(checkResultMsg); ok {
 		current, giveUp := m.check.result(res)
 		switch {
@@ -128,6 +134,18 @@ func (m *inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// head is the prompt shown before the field.
+func (m *inputModel) head() string {
+	head := styleTitle.Render(m.label + ":")
+	if m.opts.Default != "" && !m.secret {
+		head += styleDim.Render(" [" + m.opts.Default + "]")
+	}
+	if m.opts.Hint != "" {
+		head += styleDim.Render(" " + m.opts.Hint)
+	}
+	return head
+}
+
 func (m *inputModel) View() tea.View {
 	if m.finished {
 		if m.err != nil {
@@ -145,14 +163,7 @@ func (m *inputModel) View() tea.View {
 		}
 		return tea.NewView(doneLine(m.label+":", shown) + "\n")
 	}
-	head := styleTitle.Render(m.label + ":")
-	if m.opts.Default != "" && !m.secret {
-		head += styleDim.Render(" [" + m.opts.Default + "]")
-	}
-	if m.opts.Hint != "" {
-		head += styleDim.Render(" " + m.opts.Hint)
-	}
-	s := head + " " + m.input.View()
+	s := m.head() + " " + m.input.View()
 	switch {
 	case m.check.running:
 		s += "\n  " + m.check.view()

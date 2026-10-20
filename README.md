@@ -62,7 +62,7 @@ jiractl query "My Open Issues"  # Run a specific query
 
 ### `jiractl`
 
-Launches a full-screen app: the main menu, query results with a preview pane, and actions on issues. A header line shows your default epic (and warns when Jira rejects your stored token); a status bar shows the result of the last action, or the last error with a hint on what to fix. Create, Configure and Change default epic run their own prompts and bring you back to the app when done. Esc goes back; Esc on the menu or Exit leaves.
+Launches a full-screen app: the main menu, query results with a preview pane, and actions on issues. A header line shows your default epic (and warns when Jira rejects your stored token); a status bar shows the result of the last action, or the last error with a hint on what to fix. Configure and Change default epic run their own prompts and bring you back to the app when done. Create leaves the app once the issue is created and prints its fields and URL; cancelling or a failed create brings you back. Esc goes back; Esc on the menu or Exit leaves.
 
 Before setup, any interactive command offers to run `jiractl configure` first and then continues with what you asked for.
 

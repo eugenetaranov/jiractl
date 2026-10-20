@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // Textarea asks for multi-line text: Enter adds a line, Ctrl+D finishes,
@@ -27,6 +28,7 @@ type editorDoneMsg struct {
 
 type textareaModel struct {
 	label    string
+	width    int
 	area     textarea.Model
 	value    string
 	problem  string
@@ -46,7 +48,7 @@ func newTextareaModel(label, initial string) *textareaModel {
 	ta.KeyMap.LineEnd = key.NewBinding(key.WithKeys("end"))
 	ta.SetValue(initial)
 	ta.Focus()
-	return &textareaModel{label: label, area: ta}
+	return &textareaModel{label: label, width: 80, area: ta}
 }
 
 func (m *textareaModel) Init() tea.Cmd { return textarea.Blink }
@@ -60,6 +62,7 @@ func (m *textareaModel) finish() (tea.Model, tea.Cmd) {
 func (m *textareaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		m.width = msg.Width
 		m.area.SetWidth(max(msg.Width-2, 20))
 		return m, nil
 	case editorDoneMsg:
@@ -101,7 +104,7 @@ func (m *textareaModel) View() tea.View {
 			return tea.NewView("")
 		}
 		lines := strings.Count(m.value, "\n") + 1
-		summary := firstLine(m.value)
+		summary := firstLine(m.value, m.width-lipgloss.Width(m.label)-20)
 		switch {
 		case m.value == "":
 			summary = styleDim.Render("(empty)")
@@ -117,7 +120,7 @@ func (m *textareaModel) View() tea.View {
 	return tea.NewView(s)
 }
 
-func firstLine(s string) string {
+func firstLine(s string, width int) string {
 	line, _, _ := strings.Cut(s, "\n")
-	return truncate(line, 60)
+	return truncate(line, max(width, 20))
 }

@@ -122,9 +122,37 @@ func applyDefaults(draft *issueDraft, cfg *config.Config) {
 	draft.DefaultsApplied = true
 }
 
+// createdIssue is a new issue and the fields it was created with.
+type createdIssue struct {
+	key  string
+	url  string
+	rows []reviewRow
+}
+
+// report is the issue key, every field that was sent and the issue's URL.
+func (c *createdIssue) report() string {
+	var w strings.Builder
+	fmt.Fprintf(&w, "Created issue %s\n\n", c.key)
+	width := 0
+	for _, r := range c.rows {
+		width = max(width, len(r.label)+1)
+	}
+	for _, r := range c.rows {
+		for i, line := range strings.Split(r.value, "\n") {
+			label := ""
+			if i == 0 {
+				label = r.label + ":"
+			}
+			fmt.Fprintf(&w, "  %-*s  %s\n", width, label, line)
+		}
+	}
+	fmt.Fprintf(&w, "\n%s\n", c.url)
+	return w.String()
+}
+
 // createIssueFlow runs create (prompts, review, request) and returns the
 // new issue and whether it ran interactively.
-func createIssueFlow() (issue *jiralib.Issue, interactive bool, err error) {
+func createIssueFlow() (created *createdIssue, interactive bool, err error) {
 	cfg, err := loadConfig()
 	if err != nil {
 		return nil, interactive, err
@@ -223,6 +251,7 @@ func createIssueFlow() (issue *jiralib.Issue, interactive bool, err error) {
 		}
 	}
 
+	var issue *jiralib.Issue
 	for attempt := 0; ; attempt++ {
 		payload, err := buildPayload(cfg, client, draft, pf)
 		if err == nil {
@@ -244,21 +273,24 @@ func createIssueFlow() (issue *jiralib.Issue, interactive bool, err error) {
 		return nil, interactive, fmt.Errorf("failed to create issue: %w", err)
 	}
 	deleteDraft()
-	return issue, interactive, nil
+	return &createdIssue{
+		key:  issue.Key,
+		url:  fmt.Sprintf("%s/browse/%s", cfg.Server, issue.Key),
+		rows: reviewRows(draft, names, epic, cfg.IssueDefaults.EpicLink),
+	}, interactive, nil
 }
 
 func runCreate(cmd *cobra.Command, args []string) error {
-	issue, interactive, err := createIssueFlow()
+	created, interactive, err := createIssueFlow()
 	if err != nil {
 		return err
 	}
-	cfg, _ := config.Load()
-	url := fmt.Sprintf("%s/browse/%s", cfg.Server, issue.Key)
 	if interactive {
-		fmt.Printf("\nCreated issue: %s\n%s\n", issue.Key, url)
+		fmt.Println()
+		fmt.Print(created.report())
 	} else {
-		fmt.Println(issue.Key)
-		fmt.Fprintln(os.Stderr, url)
+		fmt.Println(created.key)
+		fmt.Fprintln(os.Stderr, created.url)
 	}
 	return nil
 }

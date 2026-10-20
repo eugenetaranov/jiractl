@@ -105,7 +105,14 @@ func runInteractiveMenu(cmd *cobra.Command, args []string) error {
 	if _, err := loadConfig(); err != nil {
 		return err
 	}
-	return tui.RunApp(newMenuScreen(), headerCmd())
+	menu := newMenuScreen()
+	if err := tui.RunApp(menu, headerCmd()); err != nil {
+		return err
+	}
+	if menu.created != nil {
+		fmt.Print(menu.created.report())
+	}
+	return nil
 }
 
 // checkLogin tests the stored credentials so the menu can say up front that

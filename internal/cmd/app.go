@@ -65,6 +65,9 @@ func headerCmd() tea.Cmd {
 
 type menuScreen struct {
 	list *tui.List
+	// created is set when an issue was created; the app then exits and
+	// prints it.
+	created *createdIssue
 }
 
 func newMenuScreen() *menuScreen {
@@ -80,20 +83,24 @@ func (s *menuScreen) Update(msg tea.Msg) (tui.Screen, tea.Cmd) {
 	switch msg := msg.(type) {
 	case actionDoneMsg:
 		return s, report(msg, headerCmd)
+	case issueCreatedMsg:
+		if msg.err != nil {
+			return s, report(actionDoneMsg{err: msg.err}, nil)
+		}
+		s.created = msg.created
+		return s, tui.QuitApp()
 	case tui.SelectDoneMsg:
 		if msg.Err != nil {
 			return s, tui.QuitApp()
 		}
 		switch menuItems[msg.Index] {
 		case "Create new issue":
-			return s, suspend(func() (string, error) {
-				issue, _, err := createIssueFlow()
-				if err != nil {
-					return "", err
-				}
-				cfg, _ := config.Load()
-				return fmt.Sprintf("Created %s  %s/browse/%s", issue.Key, cfg.Server, issue.Key), nil
-			}, false)
+			var created *createdIssue
+			return s, tui.Suspend(func() error {
+				var err error
+				created, _, err = createIssueFlow()
+				return err
+			}, func(err error) tea.Msg { return issueCreatedMsg{created, err} })
 		case "Run query":
 			return s, openQueryPicker()
 		case "Change default epic":
@@ -108,6 +115,12 @@ func (s *menuScreen) Update(msg tea.Msg) (tui.Screen, tea.Cmd) {
 		return s, nil
 	}
 	return s, s.list.Update(msg)
+}
+
+// issueCreatedMsg reports the end of "Create new issue".
+type issueCreatedMsg struct {
+	created *createdIssue
+	err     error
 }
 
 // suspend runs fn outside the app and reports its result.

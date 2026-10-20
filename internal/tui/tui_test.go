@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/golden"
 	"github.com/charmbracelet/x/exp/teatest/v2"
 )
@@ -106,6 +107,14 @@ func TestInputRequiredAndDefault(t *testing.T) {
 	m = feed(newInputModel("Token", InputOptions{}, true), "s3cret", "enter").(*inputModel)
 	if m.value != "s3cret" || strings.Contains(m.View().Content, "s3cret") {
 		t.Fatalf("secret leaked or wrong: %q", m.View().Content)
+	}
+}
+
+func TestInputFillsTerminalWidth(t *testing.T) {
+	m := newInputModel("Summary", InputOptions{}, false)
+	m.Update(tea.WindowSizeMsg{Width: 200, Height: 40})
+	if got, want := m.input.Width(), 200-lipgloss.Width(m.head())-2; got != want {
+		t.Fatalf("input width %d, want %d", got, want)
 	}
 }
 
