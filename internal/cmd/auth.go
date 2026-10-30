@@ -13,7 +13,13 @@ import (
 var authCmd = &cobra.Command{
 	Use:   "auth",
 	Short: "Manage authentication credentials",
-	Long:  `Manage Jira authentication credentials stored in the system keyring.`,
+	Long: `Manage Jira authentication credentials.
+
+Credentials are read from, in order: the JIRACTL_USERNAME and JIRACTL_TOKEN
+environment variables, the system keyring, and ~/.config/jiractl/credentials
+(mode 0600). They are saved to the system keyring when it is available and to
+the credentials file otherwise, e.g. on Linux without a desktop session.
+Set JIRACTL_CREDENTIAL_STORE=keyring or =file to pick one.`,
 }
 
 var authListCmd = &cobra.Command{
@@ -64,15 +70,16 @@ func runAuthList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	usernameSource, tokenSource := keyring.Sources()
 	fmt.Println("Stored credentials:")
 	if username != "" {
-		fmt.Printf("  Username: %s\n", username)
+		fmt.Printf("  Username: %s (from %s)\n", username, sourceName(usernameSource))
 	} else {
 		fmt.Println("  Username: (not set)")
 	}
 
 	if token != "" {
-		fmt.Printf("  Token:    set (%d chars)\n", len(token))
+		fmt.Printf("  Token:    set (%d chars, from %s)\n", len(token), sourceName(tokenSource))
 	} else {
 		fmt.Println("  Token:    (not set)")
 	}
@@ -80,9 +87,25 @@ func runAuthList(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// sourceName describes a credential source for output.
+func sourceName(s keyring.Source) string {
+	switch s {
+	case keyring.SourceEnv:
+		return "environment"
+	case keyring.SourceKeyring:
+		return "system keyring"
+	case keyring.SourceFile:
+		return keyring.DisplayPath()
+	}
+	return string(s)
+}
+
 func runAuthDelete(cmd *cobra.Command, args []string) error {
-	if !keyring.HasCredentials() {
+	usernameSource, tokenSource := keyring.Sources()
+	stored := func(s keyring.Source) bool { return s == keyring.SourceKeyring || s == keyring.SourceFile }
+	if !stored(usernameSource) && !stored(tokenSource) {
 		fmt.Println("No credentials stored.")
+		warnEnvCredentials()
 		return nil
 	}
 
@@ -99,7 +122,16 @@ func runAuthDelete(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("Credentials deleted.")
+	warnEnvCredentials()
 	return nil
+}
+
+// warnEnvCredentials notes credentials that come from the environment,
+// which auth delete cannot remove.
+func warnEnvCredentials() {
+	if os.Getenv(keyring.UsernameEnv) != "" || os.Getenv(keyring.TokenEnv) != "" {
+		fmt.Fprintf(os.Stderr, "Note: %s/%s are set in the environment and still apply; unset them to remove.\n", keyring.UsernameEnv, keyring.TokenEnv)
+	}
 }
 
 // runAuthCreate is the credentials step of configure on its own: same
@@ -131,7 +163,7 @@ func runAuthCreate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	fmt.Println("Credentials saved to system keyring.")
+	fmt.Printf("Credentials saved to %s.\n", keyring.WriteLocation())
 	return nil
 }
 

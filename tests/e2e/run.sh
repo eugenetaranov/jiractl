@@ -49,7 +49,7 @@ run_expect() {
 set timeout 10
 set stty_init "rows 40 cols 120"
 log_file -noappend $WORK/out.log
-spawn env JIRACTL_E2E_REDRAW=1 EDITOR=$WORK/editor.sh HOME=$home XDG_STATE_HOME=$home/state JIRACTL_TEST_USERNAME=u JIRACTL_TEST_TOKEN=t $BIN $args
+spawn env JIRACTL_E2E_REDRAW=1 EDITOR=$WORK/editor.sh HOME=$home XDG_STATE_HOME=$home/state XDG_CONFIG_HOME=$home/.config JIRACTL_TEST_USERNAME=u JIRACTL_TEST_TOKEN=t $BIN $args
 $body
 expect {
   eof {}
@@ -110,6 +110,32 @@ if [ "$EXIT" = 1 ] && cmp -s "$WORK/orig" "$H/.jiractl.toml" && out_has "credent
   pass "configure: rejected token saves nothing"
 else
   fail "configure: rejected token saves nothing" "exit=$EXIT"
+fi
+
+# --- configure without a usable keyring: credentials go to a 0600 file
+H=$(new_home)
+export JIRACTL_CREDENTIAL_STORE=file
+run_expect "$H" '
+expect "Server URL" { send "\r" }
+expect "Username" { send "u\r" }
+expect "API Token" { send "good\r" }
+expect "Select project" { sleep 0.5; send "OPS" }
+sleep 0.5
+send "\r"
+expect "default issue type" { sleep 0.5; send "\033" }
+expect "default epic" { sleep 0.5; send "\033" }
+expect "Checking setup" {}' configure
+CREDS=$H/.config/jiractl/credentials
+set +e
+KEYS=$(HOME=$H XDG_CONFIG_HOME=$H/.config "$BIN" query mine -o keys 2>"$WORK/err")
+set -e
+unset JIRACTL_CREDENTIAL_STORE
+if out_has "stored in ~/.config/jiractl/credentials" && [ -f "$CREDS" ] &&
+   [ "$(python3 -c 'import os,sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777))' "$CREDS")" = 0o600 ] &&
+   grep -q 'token = "good"' "$CREDS" && [ "$(echo $KEYS)" = "OPS-1 OPS-2 OPS-3" ]; then
+  pass "configure: file credential store"
+else
+  fail "configure: file credential store" "exit=$EXIT keys=$KEYS $(cat "$WORK/err")"
 fi
 
 # --- first run: offer setup, scheme added, project picked, starter queries, menu

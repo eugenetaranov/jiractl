@@ -103,7 +103,7 @@ func runConfigure(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Default issue type: %s\n", orNone(updated.IssueDefaults.IssueType))
 	fmt.Printf("  Default epic:       %s\n", orNone(updated.IssueDefaults.EpicLink))
 	if creds.token != "" {
-		fmt.Println("  Credentials:        stored in system keyring")
+		fmt.Printf("  Credentials:        stored in %s\n", keyring.WriteLocation())
 	}
 	if addedQueries {
 		fmt.Printf("  Queries:            added %s (try 'jiractl query mine')\n", strings.Join(updated.QueryNames(), ", "))

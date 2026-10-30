@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -352,10 +353,7 @@ func (s *actionsScreen) Update(msg tea.Msg) (tui.Screen, tea.Cmd) {
 			}
 			return s, tui.SetStatus("Opened " + url)
 		case "Copy key":
-			if err := clipboard.WriteAll(key); err != nil {
-				return s, tui.SetError(fmt.Errorf("clipboard unavailable: %w", err), "key: "+key)
-			}
-			return s, tui.SetStatus("Copied " + key)
+			return s, copyKey(key)
 		case "Transition":
 			return s, func() tea.Msg {
 				t, err := client.GetTransitions(key)
@@ -423,4 +421,16 @@ func (s *transitionScreen) Update(msg tea.Msg) (tui.Screen, tea.Cmd) {
 		}))
 	}
 	return s, s.list.Update(msg)
+}
+
+// copyKey puts key on the clipboard. Over SSH, or when no clipboard tool is
+// installed (headless Linux), it asks the terminal to do it with OSC 52, so
+// the key lands on the machine the user is sitting at.
+func copyKey(key string) tea.Cmd {
+	if os.Getenv("SSH_TTY") == "" && os.Getenv("SSH_CONNECTION") == "" {
+		if err := clipboard.WriteAll(key); err == nil {
+			return tui.SetStatus("Copied " + key)
+		}
+	}
+	return tea.Batch(tea.SetClipboard(key), tui.SetStatus("Copied "+key+" (terminal clipboard)"))
 }

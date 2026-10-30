@@ -5,7 +5,7 @@ A command-line interface for Jira with interactive menus, secure credential stor
 ## Features
 
 - Interactive menus for creating issues and running queries
-- Secure credential storage using system keyring (macOS Keychain, Windows Credential Manager, Linux Secret Service)
+- Secure credential storage using system keyring (macOS Keychain, Windows Credential Manager, Linux Secret Service), with a 0600 file or environment variables on headless Linux
 - TOML configuration with saved JQL queries
 - Issue defaults for faster ticket creation, including custom fields for required project-specific values
 
@@ -185,6 +185,8 @@ jiractl auth delete  # Remove credentials
 jiractl auth test    # Check config, credentials, server and authentication
 ```
 
+`auth list` and `doctor` show where each value comes from.
+
 ### `jiractl version` / `jiractl upgrade`
 
 ```bash
@@ -197,7 +199,7 @@ A Homebrew install refreshes the `eugenetaranov/tap` tap and runs `brew upgrade`
 
 ## Configuration
 
-Configuration is stored in `~/.jiractl.toml`. Credentials are stored securely in the system keyring.
+Configuration is stored in `~/.jiractl.toml`. Credentials are stored securely in the system keyring (see [Credentials](#credentials)).
 
 ### Example Configuration
 
@@ -292,6 +294,29 @@ limit = 30
 - epics are linked through `parent` when the create screen has it, otherwise through the Epic Link custom field (`com.pyxis.greenhopper.jira:gh-epic-link`). Set `issue_defaults.epic_field` to force either (`"parent"` or the field ID, e.g. `"customfield_10014"`). If neither is available, the issue is created without an epic and a warning says why.
 
 `jiractl doctor` warns when the server's actual type doesn't match `deployment` in the config.
+
+### Credentials
+
+jiractl looks for the username and token in this order:
+
+1. `JIRACTL_USERNAME` and `JIRACTL_TOKEN` environment variables (each overrides only its own value)
+2. The system keyring
+3. `~/.config/jiractl/credentials` (or `$XDG_CONFIG_HOME/jiractl/credentials`), a TOML file with `username` and `token`
+
+`configure` and `auth create` save to the system keyring when it works and to the credentials file otherwise. The file is written with mode `0600`; jiractl warns if it is readable by others. Set `JIRACTL_CREDENTIAL_STORE=keyring` or `=file` to pick one.
+
+#### Headless Linux / SSH
+
+A Linux VM or container with no desktop session has no Secret Service, so `jiractl configure` saves to the credentials file automatically and `doctor` shows `from file ~/.config/jiractl/credentials`. To keep the token out of files, export it from your secret manager instead:
+
+```bash
+export JIRACTL_USERNAME=you@example.com
+export JIRACTL_TOKEN="$(pass show jira/token)"
+```
+
+If a keyring is running but locked with nothing to unlock it (jiractl hangs on start), set `JIRACTL_CREDENTIAL_STORE=file`.
+
+Over SSH, "Copy key" in the query browser copies through the terminal (OSC 52), so the key lands in your local clipboard; the terminal needs OSC 52 enabled (iTerm2, kitty, Ghostty, WezTerm, Windows Terminal; tmux needs `set -g set-clipboard on`). "Open in browser" shows the URL when no browser can be opened.
 
 ### Query Variables
 

@@ -24,7 +24,10 @@ type Ctx struct {
 	ConfigPath string
 	Username   string
 	Token      string
-	Client     *jira.Client
+	// Where Username and Token came from (env, keyring, file).
+	UsernameSource keyring.Source
+	TokenSource    keyring.Source
+	Client         *jira.Client
 
 	issueTypes []jiralib.IssueType
 
@@ -40,6 +43,7 @@ func NewCtx() *Ctx {
 	ctx.ConfigPath, _ = config.ConfigPath()
 	ctx.Cfg, ctx.CfgErr = config.LoadQuiet()
 	ctx.Username, ctx.Token, _ = keyring.GetCredentials()
+	ctx.UsernameSource, ctx.TokenSource = keyring.Sources()
 	return ctx
 }
 
@@ -119,18 +123,47 @@ func checkConfigKeys(ctx *Ctx) Result {
 }
 
 func checkCreds(ctx *Ctx) Result {
+	hint := configureHint
+	if err := keyring.KeyringError(); err != nil {
+		hint += fmt.Sprintf(" (system keyring unavailable, so it saves to %s)", keyring.DisplayPath())
+	}
 	switch {
 	case ctx.Username == "" && ctx.Token == "":
-		return fail("no username or API token in the system keyring", configureHint)
+		return fail("no username or API token stored", hint)
 	case ctx.Token == "":
-		return fail("no API token in the system keyring", configureHint)
+		return fail("no API token stored", hint)
 	case ctx.Username == "" && (ctx.Cfg == nil || !ctx.Cfg.IsServer()):
-		return fail("no username in the system keyring", configureHint)
+		return fail("no username stored", hint)
 	}
-	if ctx.Username == "" {
-		return ok("personal access token")
+	detail := ctx.Username
+	if detail == "" {
+		detail = "personal access token"
 	}
-	return ok(ctx.Username)
+	detail += ", " + describeSources(ctx.UsernameSource, ctx.TokenSource)
+	if ctx.UsernameSource == keyring.SourceFile || ctx.TokenSource == keyring.SourceFile {
+		if err := keyring.FilePermError(); err != nil {
+			return warn(detail+"; "+err.Error(), "run: chmod 600 "+keyring.DisplayPath())
+		}
+	}
+	return ok(detail)
+}
+
+// describeSources says where credentials came from, e.g. "from keyring" or
+// "username from file ~/.config/jiractl/credentials, token from env".
+func describeSources(username, token keyring.Source) string {
+	name := func(s keyring.Source) string {
+		switch s {
+		case keyring.SourceEnv:
+			return "env"
+		case keyring.SourceFile:
+			return "file " + keyring.DisplayPath()
+		}
+		return string(s)
+	}
+	if username == keyring.SourceNone || username == token {
+		return "from " + name(token)
+	}
+	return fmt.Sprintf("username from %s, token from %s", name(username), name(token))
 }
 
 func checkServer(ctx *Ctx) Result {
