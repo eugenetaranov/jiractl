@@ -191,7 +191,7 @@ jiractl auth test    # Check config, credentials, server and authentication
 
 ```bash
 jiractl version          # Show the version and whether a newer release exists
-jiractl upgrade          # Upgrade to the latest release (same as 'jiractl version upgrade')
+jiractl upgrade          # Upgrade to the latest release (same as 'jiractl version upgrade', or 'up')
 jiractl upgrade --force  # Reinstall, or replace a development build
 ```
 

@@ -22,12 +22,13 @@ var versionCmd = &cobra.Command{
 	RunE:  runVersion,
 }
 
-// newUpgradeCmd builds the upgrade command; it is reachable as both
-// "jiractl upgrade" and "jiractl version upgrade".
+// newUpgradeCmd builds the upgrade command; it is reachable as
+// "jiractl upgrade" and "jiractl version upgrade", or "up" for short.
 func newUpgradeCmd() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "upgrade",
-		Short: "Upgrade jiractl to the latest release",
+		Use:     "upgrade",
+		Aliases: []string{"up"},
+		Short:   "Upgrade jiractl to the latest release",
 		Long: `Upgrade jiractl to the latest GitHub release.
 
 A Homebrew install refreshes the ` + selfupdate.Tap + ` tap, then runs
