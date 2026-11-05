@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	tea "charm.land/bubbletea/v2"
 	jiralib "github.com/andygrunwald/go-jira"
@@ -141,10 +142,18 @@ func suspend(fn func() (string, error), refreshHeader bool) tea.Cmd {
 
 // --- saved query picker
 
+// searchIssuesRow follows the saved queries in the picker.
+const searchIssuesRow = "Search issues…"
+
 type queryPickScreen struct {
 	cfg     *config.Config
 	list    *tui.List
 	loading string
+}
+
+func newQueryPickScreen(cfg *config.Config) *queryPickScreen {
+	items := append(cfg.QueryNames(), searchIssuesRow)
+	return &queryPickScreen{cfg: cfg, list: tui.NewList("queries", items, tui.SelectOptions{Header: "Select query"})}
 }
 
 func openQueryPicker() tea.Cmd {
@@ -152,10 +161,64 @@ func openQueryPicker() tea.Cmd {
 	if err != nil {
 		return tui.SetError(err, errorHint(err))
 	}
-	if len(cfg.Queries) == 0 {
-		return tui.SetError(errors.New("no queries configured"), "add [[queries]] to ~/"+config.ConfigFileName+" or run Configure to add starter queries")
+	return tui.Push(newQueryPickScreen(cfg))
+}
+
+// issueSearchedMsg reports the end of "Search issues…".
+type issueSearchedMsg struct {
+	query  string
+	issues []jiralib.Issue
+	chosen *jiralib.Issue
+	client *jira.Client
+	err    error
+}
+
+// searchIssues runs the live issue search outside the app.
+func searchIssues(cfg *config.Config) tea.Cmd {
+	client, err := jira.NewClient(cfg)
+	if err != nil {
+		return tui.SetError(err, errorHint(err))
 	}
-	return tui.Push(&queryPickScreen{cfg: cfg, list: tui.NewList("queries", cfg.QueryNames(), tui.SelectOptions{Header: "Select query"})})
+	var res issueSearchedMsg
+	return tui.Suspend(func() error {
+		var err error
+		res.query, res.issues, res.chosen, err = chooseIssue(client)
+		return err
+	}, func(err error) tea.Msg {
+		res.client, res.err = client, err
+		return res
+	})
+}
+
+// chooseIssue opens a search across all projects, which asks Jira as the
+// user types. It returns the query, its results and the chosen issue.
+func chooseIssue(client *jira.Client) (string, []jiralib.Issue, *jiralib.Issue, error) {
+	var mu sync.Mutex
+	byQuery := map[string][]jiralib.Issue{}
+	res, err := tui.SearchSelect(tui.SearchOptions{
+		Header: "Search issues (type words or a key)",
+		Search: func(q string) ([]string, error) {
+			issues, err := client.SearchAnyIssues(q, 50)
+			if err != nil {
+				return nil, err
+			}
+			mu.Lock()
+			byQuery[q] = issues
+			mu.Unlock()
+			rows := make([]string, len(issues))
+			for i := range issues {
+				rows[i] = issueRow(issues[i])
+			}
+			return rows, nil
+		},
+	})
+	if err != nil {
+		return "", nil, nil, err
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	issues := byQuery[res.Query]
+	return res.Query, issues, &issues[res.Index], nil
 }
 
 type queryLoadedMsg struct {
@@ -181,6 +244,9 @@ func (s *queryPickScreen) Update(msg tea.Msg) (tui.Screen, tea.Cmd) {
 		if msg.Err != nil {
 			return s, tui.Pop()
 		}
+		if msg.Index == len(s.cfg.Queries) {
+			return s, searchIssues(s.cfg)
+		}
 		q := s.cfg.Queries[msg.Index]
 		s.loading = q.Name
 		return s, loadQuery(s.cfg, q.Name, s.cfg.ExpandJQL(q.JQL), q.Limit)
@@ -196,6 +262,17 @@ func (s *queryPickScreen) Update(msg tea.Msg) (tui.Screen, tea.Cmd) {
 			tui.SetStatus(fmt.Sprintf("%s: %d issues", msg.title, len(msg.issues))),
 			tui.Push(newResultsScreen(s.cfg, msg.client, msg.title, msg.issues)),
 		)
+	case issueSearchedMsg:
+		if msg.err != nil {
+			return s, report(actionDoneMsg{err: msg.err}, nil)
+		}
+		// The matches stay behind the actions menu, so Esc goes back to them.
+		title := "Recently viewed"
+		if msg.query != "" {
+			title = fmt.Sprintf("Search %q", msg.query)
+		}
+		results := newResultsScreen(s.cfg, msg.client, title, msg.issues)
+		return s, tea.Sequence(tui.Push(results), tui.Push(newActionsScreen(results, *msg.chosen)))
 	}
 	return s, s.list.Update(msg)
 }

@@ -21,8 +21,11 @@ import (
 
 var queryCmd = &cobra.Command{
 	Use:   "query [name]",
-	Short: "Run a saved query or ad-hoc JQL",
-	Long: `Run a saved JQL query from your config file, or any JQL with --jql.
+	Short: "Run a saved query, ad-hoc JQL or a search",
+	Long: `Run a saved JQL query from your config file, any JQL with --jql, or
+search issues in all projects with --search (words match the summary; a key
+like ABC-123 matches that issue). Without a name the picker lists the saved
+queries and "Search issues…", which searches live as you type.
 
 Names match exactly, case-insensitively, or by unique prefix ("rec" runs
 "recent"). Results open in a picker with a preview pane; Enter opens an
@@ -32,18 +35,21 @@ When stdout is not a terminal, or with -o, results are printed instead:
 -o keys prints one key per line, -o json a JSON array, -o table a table.`,
 	Example: `  jiractl query mine
   jiractl query --jql "project = \${project} AND labels = urgent"
-  jiractl query mine -o keys | xargs -n1 echo`,
+  jiractl query mine -o keys | xargs -n1 echo
+  jiractl query --search "login bug"`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runQueryCmd,
 }
 
 var queryOpts struct {
 	jql    string
+	search string
 	output string
 }
 
 func init() {
 	queryCmd.Flags().StringVar(&queryOpts.jql, "jql", "", "Run this JQL instead of a saved query (${project} is expanded)")
+	queryCmd.Flags().StringVar(&queryOpts.search, "search", "", "Search issues in all projects by summary words or key")
 	queryCmd.Flags().StringVarP(&queryOpts.output, "output", "o", "", "Print results instead of opening the picker: keys, json or table")
 	RootCmd.AddCommand(queryCmd)
 }
@@ -64,19 +70,27 @@ func runQueryCmd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if queryOpts.jql != "" && queryOpts.search != "" {
+		return errors.New("pass --jql or --search, not both")
+	}
+	if (queryOpts.jql != "" || queryOpts.search != "") && len(args) > 0 {
+		return errors.New("pass a query name, --jql or --search, not one with another")
+	}
 	if queryOpts.jql != "" {
-		if len(args) > 0 {
-			return errors.New("pass a query name or --jql, not both")
-		}
 		return executeQuery(cfg, "JQL", cfg.ExpandJQL(queryOpts.jql), 50, queryOpts.output)
+	}
+	if queryOpts.search != "" {
+		text := queryOpts.search
+		return runSearch(cfg, "search "+text, jira.IssueSearchJQL(text, true), queryOpts.output,
+			func(c *jira.Client) ([]jiralib.Issue, error) { return c.SearchAnyIssues(text, 50) })
 	}
 
 	var q *config.Query
 	if len(args) == 0 {
 		if queryOpts.output != "" || !stdoutIsTerminal() {
-			return fmt.Errorf("query name required; available: %s", strings.Join(cfg.QueryNames(), ", "))
+			return fmt.Errorf("query name or --search required; available queries: %s", strings.Join(cfg.QueryNames(), ", "))
 		}
-		return tui.RunApp(&queryPickScreen{cfg: cfg, list: tui.NewList("queries", cfg.QueryNames(), tui.SelectOptions{Header: "Select query"})}, nil)
+		return tui.RunApp(newQueryPickScreen(cfg), nil)
 	} else if q, err = cfg.FindQuery(args[0]); err != nil {
 		return err
 	}
@@ -84,18 +98,26 @@ func runQueryCmd(cmd *cobra.Command, args []string) error {
 }
 
 func executeQuery(cfg *config.Config, title, jql string, limit int, output string) error {
+	if limit <= 0 {
+		limit = 50
+	}
+	return runSearch(cfg, title, jql, output, func(c *jira.Client) ([]jiralib.Issue, error) {
+		return c.SearchIssues(jql, limit)
+	})
+}
+
+// runSearch fetches issues and prints them or opens the results picker. jql
+// is what fetch runs, shown to the user.
+func runSearch(cfg *config.Config, title, jql, output string, fetch func(*jira.Client) ([]jiralib.Issue, error)) error {
 	client, err := jira.NewClient(cfg)
 	if err != nil {
 		return err
-	}
-	if limit <= 0 {
-		limit = 50
 	}
 
 	fmt.Fprintf(os.Stderr, "Running query: %s\n", title)
 	fmt.Fprintf(os.Stderr, "JQL: %s\n", jql)
 
-	issues, err := client.SearchIssues(jql, limit)
+	issues, err := fetch(client)
 	if err != nil {
 		return fmt.Errorf("query %q failed: %w", title, err)
 	}

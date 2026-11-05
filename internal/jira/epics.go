@@ -46,7 +46,26 @@ func EpicSearchJQL(project, text string, wildcard bool) string {
 	if text == "" {
 		return base + " AND resolution = Unresolved ORDER BY updated DESC"
 	}
+	cond := textSearchCond(text, wildcard)
+	if cond == "" {
+		return base + " ORDER BY updated DESC"
+	}
+	return fmt.Sprintf("%s AND (%s) ORDER BY updated DESC", base, cond)
+}
 
+// IssueSearchJQL builds the JQL for a search across all projects, matching
+// text like EpicSearchJQL. Empty text lists recently viewed issues.
+func IssueSearchJQL(text string, wildcard bool) string {
+	cond := textSearchCond(strings.TrimSpace(text), wildcard)
+	if cond == "" {
+		return "issuekey in issueHistory() ORDER BY lastViewed DESC"
+	}
+	return cond + " ORDER BY updated DESC"
+}
+
+// textSearchCond requires every word to match the summary (as a prefix with
+// wildcard); text that looks like an issue key also matches the key.
+func textSearchCond(text string, wildcard bool) string {
 	var terms []string
 	for _, w := range strings.Fields(text) {
 		w = strings.NewReplacer(`"`, "", `\`, "", "'", "").Replace(w)
@@ -67,10 +86,7 @@ func EpicSearchJQL(project, text string, wildcard bool) string {
 			cond = fmt.Sprintf("(%s) OR %s", cond, key)
 		}
 	}
-	if cond == "" {
-		return base + " ORDER BY updated DESC"
-	}
-	return fmt.Sprintf("%s AND (%s) ORDER BY updated DESC", base, cond)
+	return cond
 }
 
 // SearchEpics finds epics in project matching text, unresolved ones first.
@@ -84,6 +100,23 @@ func (c *Client) SearchEpics(project, text string) ([]jira.Issue, error) {
 		return nil, err
 	}
 	SortForDisplay(issues)
+	return issues, nil
+}
+
+// SearchAnyIssues finds issues in any project matching text; empty text
+// lists recently viewed issues, most recent first.
+func (c *Client) SearchAnyIssues(text string, limit int) ([]jira.Issue, error) {
+	issues, err := c.SearchIssues(IssueSearchJQL(text, true), limit)
+	if err != nil && StatusOf(err) == 400 {
+		// Some instances reject wildcard text search; retry with plain words.
+		issues, err = c.SearchIssues(IssueSearchJQL(text, false), limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(text) != "" {
+		SortForDisplay(issues)
+	}
 	return issues, nil
 }
 

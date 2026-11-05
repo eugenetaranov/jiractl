@@ -23,6 +23,46 @@ func TestEpicSearchJQL(t *testing.T) {
 	}
 }
 
+func TestIssueSearchJQL(t *testing.T) {
+	cases := []struct {
+		text     string
+		wildcard bool
+		want     string
+	}{
+		{"", true, `issuekey in issueHistory() ORDER BY lastViewed DESC`},
+		{`  "" `, true, `issuekey in issueHistory() ORDER BY lastViewed DESC`},
+		{"login bug", true, `summary ~ "login*" AND summary ~ "bug*" ORDER BY updated DESC`},
+		{"login bug", false, `summary ~ "login" AND summary ~ "bug" ORDER BY updated DESC`},
+		{"web-42", true, `(summary ~ "web-42*") OR key = "WEB-42" ORDER BY updated DESC`},
+	}
+	for _, c := range cases {
+		if got := IssueSearchJQL(c.text, c.wildcard); got != c.want {
+			t.Errorf("%q:\n got %s\nwant %s", c.text, got, c.want)
+		}
+	}
+}
+
+func TestSearchAnyIssuesFallsBack(t *testing.T) {
+	var jqls []string
+	c := newTestClient(t, &config.Config{}, func(w http.ResponseWriter, r *http.Request) {
+		jql := r.URL.Query().Get("jql")
+		jqls = append(jqls, jql)
+		if strings.Contains(jql, "*") {
+			w.WriteHeader(400)
+			_, _ = io.WriteString(w, `{"errorMessages":["wildcards not allowed"]}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"issues":[{"key":"WEB-1","fields":{"summary":"login bug"}}]}`)
+	})
+	issues, err := c.SearchAnyIssues("login", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jqls) != 2 || strings.Contains(jqls[1], "project") || len(issues) != 1 || issues[0].Key != "WEB-1" {
+		t.Fatalf("jqls=%q issues=%v", jqls, issues)
+	}
+}
+
 func TestSearchEpicsFallsBackAndSortsOpenFirst(t *testing.T) {
 	calls := 0
 	c := newTestClient(t, &config.Config{}, func(w http.ResponseWriter, r *http.Request) {

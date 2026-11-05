@@ -54,7 +54,7 @@ jiractl
 
 # Or use commands directly
 jiractl create        # Create a new issue
-jiractl query         # Select and run a saved query
+jiractl query         # Select and run a saved query, or search issues
 jiractl query "My Open Issues"  # Run a specific query
 ```
 
@@ -133,6 +133,8 @@ jiractl inspect https://yourcompany.atlassian.net/browse/PROJ-123
 
 Run a saved JQL query. Without a name, shows a menu of available queries. Names match exactly, case-insensitively, or by unique prefix (`jiractl query rec` runs `recent`); an unknown name lists the available ones.
 
+To find any issue, in any project, pick **Search issues…** at the end of the menu: it starts with your recently viewed issues and searches Jira as you type (every word must match the summary; a key like `WEB-42` finds that issue). Enter opens the actions menu for the chosen issue; Esc goes back to the matches. `--search` does the same from the command line.
+
 Results are listed In Progress first, then To Do, then Done (any status in Jira's done category, such as "Completed" or "Closed"), with the most recently updated first in each group; each row shows how long ago it was updated (`3h`, `2d`, `4mo`). Epic pickers use the same order. `-o keys` and `-o json` keep Jira's order, so your JQL `ORDER BY` still applies there.
 
 Results open in a picker with the highlighted issue's details in a preview pane. Enter opens an actions menu:
@@ -150,6 +152,7 @@ After each action you're back in the results; Esc leaves.
 
 ```bash
 jiractl query --jql 'project = ${project} AND labels = urgent'   # one-off JQL
+jiractl query --search "login bug"                              # search all projects
 jiractl query mine -o keys      # one key per line
 jiractl query mine -o json      # [{"key", "summary", "status", "assignee"}, ...]
 jiractl query mine | grep Bug   # piped: plain table, no picker
